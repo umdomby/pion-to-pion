@@ -511,3 +511,145 @@
     border-radius: 3px;
     font-size: 0.9em;
 }
+
+/* file: client2/app/webrtc/styles.module.css */
+.inputGroup {
+    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.inputGroup label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: hsl(var(--foreground));
+}
+
+.inputGroup input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: calc(var(--radius) - 2px);
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-size: 0.875rem;
+    transition: border-color 0.2s;
+}
+
+.inputGroup input:focus {
+    outline: none;
+    border-color: hsl(var(--primary));
+    box-shadow: 0 0 0 2px hsla(var(--primary), 0.2);
+}
+
+/* Для темной темы */
+@media (prefers-color-scheme: dark) {
+    .inputGroup input {
+        background-color: hsl(var(--card));
+    }
+}
+
+.localVideo {
+    position: relative;
+    width: 100%;
+    /*max-width: 300px;*/
+    height: auto;
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    background-color: hsl(var(--muted));
+    transform: scaleX(-1); /* Зеркальное отображение для естественного вида */
+    object-fit: cover;
+    aspect-ratio: 16/9;
+}
+
+/* Стили для контейнера видео */
+.videoWrapper {
+    position: relative;
+    margin-bottom: 1rem;
+}
+
+/* Метка под видео */
+.videoLabel {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    background-color: hsla(var(--background)/0.8);
+    color: hsl(var(--foreground));
+    padding: 4px 8px;
+    border-radius: calc(var(--radius) - 2px);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+/* Для темной темы */
+@media (prefers-color-scheme: dark) {
+    .localVideo {
+        border: 1px solid hsl(var(--border));
+    }
+}
+
+/* Стили для списка пользователей */
+.userList {
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.userList h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    color: hsl(var(--foreground));
+}
+
+.userList ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.userList li {
+    font-size: 0.875rem;
+    padding: 0.5rem;
+    border-radius: calc(var(--radius) - 4px);
+    background-color: hsl(var(--muted)/0.5);
+    color: hsl(var(--foreground));
+}
+
+/* Стили для удаленного видео */
+.remoteVideo {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius);
+    background-color: hsl(var(--muted));
+    object-fit: cover;
+    aspect-ratio: 16/9;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Контейнер для удаленного видео */
+.remoteVideoContainer {
+    position: relative;
+    margin-top: 1rem;
+}
+
+/* Адаптация для темной темы */
+@media (prefers-color-scheme: dark) {
+    .userList {
+        background-color: hsl(var(--card));
+        border-color: hsl(var(--border));
+    }
+
+    .remoteVideo {
+        border: 1px solid hsl(var(--border)/0.3);
+    }
+}

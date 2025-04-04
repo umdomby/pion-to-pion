@@ -1,6 +1,13 @@
 // file: client2/app/webrtc/hooks/useWebRTC.ts
 import { useEffect, useRef, useState } from 'react';
 
+interface WebSocketMessage {
+    type: string;
+    data?: any;
+    sdp?: RTCSessionDescriptionInit;
+    ice?: RTCIceCandidateInit;
+}
+
 export const useWebRTC = (
     deviceIds: { video: string; audio: string },
     username: string,
@@ -107,9 +114,14 @@ export const useWebRTC = (
                 });
             };
 
+            // Добавьте проверку на существование ws.current
+            if (!ws.current) {
+                throw new Error('WebSocket connection not established');
+            }
+
             ws.current.onmessage = async (event) => {
                 try {
-                    const data = JSON.parse(event.data);
+                    const data: WebSocketMessage = JSON.parse(event.data);
 
                     if (data.type === 'room_info') {
                         setRemoteUsers(
