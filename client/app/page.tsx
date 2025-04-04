@@ -2,8 +2,20 @@
 
 import { useState, useEffect, useRef, forwardRef } from 'react';
 import styles from './page.module.css';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 
-// Define video components directly in the same file to avoid import issues
+// Компоненты видео (локальное и удаленное)
 const LocalVideo = forwardRef<HTMLVideoElement>((props, ref) => (
     <video
         ref={ref}
@@ -23,9 +35,11 @@ const RemoteVideo = forwardRef<HTMLVideoElement>((props, ref) => (
     />
 ));
 
+// Тип для пользователей
 type User = string;
 
 export default function Home() {
+  // Состояния приложения
   const [isLoading, setIsLoading] = useState(true);
   const [username, setUsername] = useState('');
   const [room, setRoom] = useState('room1');
@@ -34,11 +48,13 @@ export default function Home() {
   const [error, setError] = useState('');
   const [isConnected, setIsConnected] = useState(false);
 
+  // Рефы для DOM элементов и WebRTC
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const ws = useRef<WebSocket | null>(null);
   const pc = useRef<RTCPeerConnection | null>(null);
 
+  // Очистка ресурсов
   const cleanup = () => {
     if (pc.current) {
       pc.current.onicecandidate = null;
@@ -60,6 +76,7 @@ export default function Home() {
     setIsCallActive(false);
   };
 
+  // Подключение к WebSocket серверу
   const connectWebSocket = () => {
     try {
       ws.current = new WebSocket('wss://anybet.site/ws');
@@ -73,25 +90,26 @@ export default function Home() {
       };
 
       ws.current.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setError('Connection error');
+        console.error('Ошибка WebSocket:', error);
+        setError('Ошибка подключения');
         setIsConnected(false);
       };
 
       ws.current.onclose = () => {
-        console.log('WebSocket disconnected');
+        console.log('WebSocket отключен');
         setIsConnected(false);
         cleanup();
       };
 
       return true;
     } catch (err) {
-      console.error('WebSocket connection failed:', err);
-      setError('Failed to connect to server');
+      console.error('Ошибка подключения WebSocket:', err);
+      setError('Не удалось подключиться к серверу');
       return false;
     }
   };
 
+  // Инициализация WebRTC
   const initializeWebRTC = async () => {
     try {
       if (pc.current) {
@@ -105,6 +123,7 @@ export default function Home() {
       pc.current = new RTCPeerConnection(config);
 
       try {
+        // Получаем доступ к камере и микрофону
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true
@@ -116,23 +135,26 @@ export default function Home() {
           pc.current?.addTrack(track, stream);
         });
       } catch (err) {
-        console.error('Error accessing media devices:', err);
-        setError('Could not access camera/microphone');
+        console.error('Ошибка доступа к медиаустройствам:', err);
+        setError('Не удалось получить доступ к камере/микрофону');
         return false;
       }
 
+      // Обработка ICE кандидатов
       pc.current.onicecandidate = (event) => {
         if (event.candidate && ws.current?.readyState === WebSocket.OPEN) {
           ws.current.send(JSON.stringify({ ice: event.candidate }));
         }
       };
 
+      // Получение удаленного потока
       pc.current.ontrack = (event) => {
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = event.streams[0];
         }
       };
 
+      // Обработка сообщений от сервера
       ws.current.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -156,26 +178,27 @@ export default function Home() {
             try {
               await pc.current.addIceCandidate(new RTCIceCandidate(data.ice));
             } catch (e) {
-              console.error('Error adding ICE candidate:', e);
+              console.error('Ошибка добавления ICE кандидата:', e);
             }
           }
         } catch (err) {
-          console.error('Error processing message:', err);
+          console.error('Ошибка обработки сообщения:', err);
         }
       };
 
       return true;
     } catch (err) {
-      console.error('WebRTC initialization failed:', err);
-      setError('Failed to initialize WebRTC');
+      console.error('Ошибка инициализации WebRTC:', err);
+      setError('Не удалось инициализировать WebRTC');
       cleanup();
       return false;
     }
   };
 
+  // Начало звонка
   const startCall = async () => {
     if (!pc.current || !ws.current || ws.current.readyState !== WebSocket.OPEN) {
-      setError('Not connected to server');
+      setError('Нет подключения к серверу');
       return;
     }
 
@@ -186,15 +209,17 @@ export default function Home() {
       setIsCallActive(true);
       setError('');
     } catch (err) {
-      console.error('Error starting call:', err);
-      setError('Failed to start call');
+      console.error('Ошибка начала звонка:', err);
+      setError('Не удалось начать звонок');
     }
   };
 
+  // Завершение звонка
   const endCall = () => {
     cleanup();
   };
 
+  // Подключение к комнате
   const joinRoom = async () => {
     setError('');
 
@@ -209,6 +234,7 @@ export default function Home() {
     }
   };
 
+  // Эффект при монтировании компонента
   useEffect(() => {
     setUsername(`User${Math.floor(Math.random() * 1000)}`);
     setIsLoading(false);
@@ -223,82 +249,100 @@ export default function Home() {
   }, []);
 
   if (isLoading) {
-    return <div className={styles.loading}>Loading...</div>;
+    return <div className={styles.loading}>Загрузка...</div>;
   }
 
   return (
       <div className={styles.appContainer}>
-        <div className={styles.controlPanel}>
-          <div className={styles.connectionStatus}>
-            Status: {isConnected ? 'Connected' : 'Disconnected'}
-          </div>
+        {/* Боковое меню (Sheet) */}
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button
+                variant="outline"
+                className={styles.menuButton}
+            >
+              ☰ Меню
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="left" className={styles.sheetContent}>
+            <SheetHeader>
+              <SheetTitle>Управление видеозвонком</SheetTitle>
+              <SheetDescription>
+                Настройки подключения и параметры звонка
+              </SheetDescription>
+            </SheetHeader>
 
-          <div className={styles.inputGroup}>
-            <label>Room:</label>
-            <input
-                type="text"
-                value={room}
-                onChange={(e) => setRoom(e.target.value)}
-            />
-          </div>
+            <div className={styles.sheetForm}>
+              <div className={styles.inputGroup}>
+                <Label htmlFor="room">Комната:</Label>
+                <Input
+                    id="room"
+                    value={room}
+                    onChange={(e) => setRoom(e.target.value)}
+                />
+              </div>
 
-          <div className={styles.inputGroup}>
-            <label>Username:</label>
-            <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-            />
-          </div>
+              <div className={styles.inputGroup}>
+                <Label htmlFor="username">Имя пользователя:</Label>
+                <Input
+                    id="username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
 
-          <button
-              onClick={joinRoom}
-              disabled={isConnected}
-              className={styles.button}
-          >
-            {isConnected ? 'Joined' : 'Join Room'}
-          </button>
+              <Button
+                  onClick={joinRoom}
+                  disabled={isConnected}
+                  className={styles.button}
+              >
+                {isConnected ? 'Подключен' : 'Войти в комнату'}
+              </Button>
 
-          <div className={styles.userList}>
-            <h3>Users in room ({users.length}):</h3>
-            <ul>
-              {users.map((user, index) => (
-                  <li key={index}>{user}</li>
-              ))}
-            </ul>
-          </div>
+              <div className={styles.userList}>
+                <h3>Участники ({users.length}):</h3>
+                <ul>
+                  {users.map((user, index) => (
+                      <li key={index}>{user}</li>
+                  ))}
+                </ul>
+              </div>
 
-          <div className={styles.callControls}>
-            {!isCallActive ? (
-                <button
-                    onClick={startCall}
-                    disabled={!isConnected || users.length < 2}
-                    className={styles.button}
-                >
-                  Start Call
-                </button>
-            ) : (
-                <button
-                    onClick={endCall}
-                    className={styles.button}
-                >
-                  End Call
-                </button>
-            )}
-          </div>
+              <div className={styles.callControls}>
+                {!isCallActive ? (
+                    <Button
+                        onClick={startCall}
+                        disabled={!isConnected || users.length < 2}
+                        className={styles.button}
+                    >
+                      Начать звонок
+                    </Button>
+                ) : (
+                    <Button
+                        onClick={endCall}
+                        className={styles.button}
+                        variant="destructive"
+                    >
+                      Завершить звонок
+                    </Button>
+                )}
+              </div>
+            </div>
 
-          {error && <div className={styles.errorMessage}>{error}</div>}
-        </div>
+            {error && <div className={styles.errorMessage}>{error}</div>}
+          </SheetContent>
+        </Sheet>
 
+        {/* Контейнер с видео */}
         <div className={styles.videoContainer}>
           <div className={styles.videoWrapper}>
             <LocalVideo ref={localVideoRef} />
-            <div className={styles.videoLabel}>You ({username})</div>
+            <div className={styles.videoLabel}>Вы ({username})</div>
           </div>
 
           <div className={styles.videoWrapper}>
             <RemoteVideo ref={remoteVideoRef} />
-            <div className={styles.videoLabel}>Remote</div>
+            <div className={styles.videoLabel}>Собеседник</div>
           </div>
         </div>
       </div>

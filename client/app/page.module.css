@@ -1,40 +1,43 @@
+/* Основные стили приложения */
 .appContainer {
     display: flex;
     height: 100vh;
     font-family: Arial, sans-serif;
+    position: relative;
 }
 
-.controlPanel {
-    width: 300px;
-    padding: 20px;
-    background-color: #f5f5f5;
-    border-right: 1px solid #ddd;
-    overflow-y: auto;
-}
-
-.connectionStatus {
-    margin-bottom: 20px;
-    padding: 8px;
-    background-color: #e0e0e0;
-    border-radius: 4px;
-    font-weight: bold;
-}
-
-.inputGroup {
-    margin-bottom: 15px;
-}
-
-.inputGroup label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: bold;
-}
-
-.inputGroup input {
-    width: 100%;
-    padding: 8px;
+/* Стили для кнопки меню */
+.menuButton {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 1000;
+    padding: 8px 16px;
+    background-color: #fff;
     border: 1px solid #ddd;
     border-radius: 4px;
+    cursor: pointer;
+}
+
+/* Стили для бокового меню */
+.sheetContent {
+    background-color: #f8fafc;
+    width: 350px;
+    max-width: 100%;
+}
+
+.sheetForm {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    padding: 1rem 0;
+}
+
+/* Стили для формы в меню */
+.inputGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
 }
 
 .button {
@@ -54,6 +57,7 @@
     cursor: not-allowed;
 }
 
+/* Стили для списка пользователей */
 .userList {
     margin-top: 20px;
 }
@@ -62,17 +66,21 @@
     list-style-type: none;
     padding: 0;
     margin: 0;
+    max-height: 200px;
+    overflow-y: auto;
 }
 
 .userList li {
-    padding: 5px 0;
+    padding: 8px 0;
     border-bottom: 1px solid #eee;
 }
 
+/* Стили для управления звонком */
 .callControls {
     margin-top: 20px;
 }
 
+/* Стили для сообщений об ошибках */
 .errorMessage {
     margin-top: 20px;
     padding: 10px;
@@ -81,6 +89,7 @@
     border-radius: 4px;
 }
 
+/* Стили для видео контейнера */
 .videoContainer {
     flex: 1;
     display: flex;
@@ -114,127 +123,10 @@
 }
 
 .localVideo {
-    transform: scaleX(-1); /* Mirror effect for local video */
-}
-.appContainer {
-    display: flex;
-    height: 100vh;
-    font-family: Arial, sans-serif;
+    transform: scaleX(-1); /* Зеркальное отображение для локального видео */
 }
 
-.controlPanel {
-    width: 300px;
-    padding: 20px;
-    background-color: #f5f5f5;
-    border-right: 1px solid #ddd;
-    overflow-y: auto;
-}
-
-.connectionStatus {
-    margin-bottom: 20px;
-    padding: 8px;
-    background-color: #e0e0e0;
-    border-radius: 4px;
-    font-weight: bold;
-}
-
-.inputGroup {
-    margin-bottom: 15px;
-}
-
-.inputGroup label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: bold;
-}
-
-.inputGroup input {
-    width: 100%;
-    padding: 8px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-}
-
-.button {
-    width: 100%;
-    padding: 10px;
-    margin-bottom: 10px;
-    background-color: #4CAF50;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 16px;
-}
-
-.button:disabled {
-    background-color: #cccccc;
-    cursor: not-allowed;
-}
-
-.userList {
-    margin-top: 20px;
-}
-
-.userList ul {
-    list-style-type: none;
-    padding: 0;
-    margin: 0;
-}
-
-.userList li {
-    padding: 5px 0;
-    border-bottom: 1px solid #eee;
-}
-
-.callControls {
-    margin-top: 20px;
-}
-
-.errorMessage {
-    margin-top: 20px;
-    padding: 10px;
-    background-color: #ffebee;
-    color: #d32f2f;
-    border-radius: 4px;
-}
-
-.videoContainer {
-    flex: 1;
-    display: flex;
-    flex-wrap: wrap;
-    padding: 20px;
-    background-color: #333;
-}
-
-.videoWrapper {
-    position: relative;
-    width: 50%;
-    padding: 10px;
-    box-sizing: border-box;
-}
-
-.videoLabel {
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    background-color: rgba(0, 0, 0, 0.5);
-    color: white;
-    padding: 5px 10px;
-    border-radius: 4px;
-}
-
-.localVideo, .remoteVideo {
-    width: 100%;
-    height: auto;
-    background-color: #000;
-    border-radius: 4px;
-}
-
-.localVideo {
-    transform: scaleX(-1);
-}
-
+/* Стили для состояния загрузки */
 .loading {
     display: flex;
     justify-content: center;
