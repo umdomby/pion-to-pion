@@ -1,103 +1,298 @@
-import Image from "next/image";
+'use client'
+
+import { useState, useEffect, useRef } from 'react';
+import styles from './page.module.css';
+
+type User = string;
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [username, setUsername] = useState(`User${Math.floor(Math.random() * 1000)}`);
+  const [room, setRoom] = useState('room1');
+  const [users, setUsers] = useState<User[]>([]);
+  const [isCallActive, setIsCallActive] = useState(false);
+  const [error, setError] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const ws = useRef<WebSocket | null>(null);
+  const pc = useRef<RTCPeerConnection | null>(null);
+
+  const cleanup = () => {
+    // Close WebRTC connection
+    if (pc.current) {
+      pc.current.onicecandidate = null;
+      pc.current.ontrack = null;
+      pc.current.close();
+      pc.current = null;
+    }
+
+    // Stop media streams
+    if (localVideoRef.current?.srcObject) {
+      (localVideoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
+      localVideoRef.current.srcObject = null;
+    }
+
+    if (remoteVideoRef.current?.srcObject) {
+      (remoteVideoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
+      remoteVideoRef.current.srcObject = null;
+    }
+
+    setIsCallActive(false);
+  };
+
+  const connectWebSocket = () => {
+    try {
+      ws.current = new WebSocket('wss://anybet.site/ws');
+
+      ws.current.onopen = () => {
+        setIsConnected(true);
+        // Send connection data (room and username)
+        ws.current?.send(JSON.stringify({
+          room,
+          username
+        }));
+      };
+
+      ws.current.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setError('Connection error');
+        setIsConnected(false);
+      };
+
+      ws.current.onclose = () => {
+        console.log('WebSocket disconnected');
+        setIsConnected(false);
+        cleanup();
+      };
+
+      return true;
+    } catch (err) {
+      console.error('WebSocket connection failed:', err);
+      setError('Failed to connect to server');
+      return false;
+    }
+  };
+
+  const initializeWebRTC = async () => {
+    try {
+      // Clean up previous connection
+      if (pc.current) {
+        cleanup();
+      }
+
+      const config: RTCConfiguration = {
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      };
+
+      pc.current = new RTCPeerConnection(config);
+
+      // Get video stream from camera
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true
+        });
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+        stream.getTracks().forEach(track => {
+          pc.current?.addTrack(track, stream);
+        });
+      } catch (err) {
+        console.error('Error accessing media devices:', err);
+        setError('Could not access camera/microphone');
+        return false;
+      }
+
+      // Handle ICE candidates
+      pc.current.onicecandidate = (event) => {
+        if (event.candidate && ws.current?.readyState === WebSocket.OPEN) {
+          ws.current.send(JSON.stringify({ ice: event.candidate }));
+        }
+      };
+
+      // Handle remote stream
+      pc.current.ontrack = (event) => {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      // Handle server messages
+      ws.current.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'room_info') {
+            setUsers(data.data.users);
+          }
+          else if (data.type === 'error') {
+            setError(data.data);
+          }
+          else if (data.sdp && pc.current) {
+            await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            if (data.sdp.type === 'offer') {
+              const answer = await pc.current.createAnswer();
+              await pc.current.setLocalDescription(answer);
+              if (ws.current?.readyState === WebSocket.OPEN) {
+                ws.current.send(JSON.stringify({ sdp: answer }));
+              }
+            }
+          } else if (data.ice && pc.current) {
+            try {
+              await pc.current.addIceCandidate(new RTCIceCandidate(data.ice));
+            } catch (e) {
+              console.error('Error adding ICE candidate:', e);
+            }
+          }
+        } catch (err) {
+          console.error('Error processing message:', err);
+        }
+      };
+
+      return true;
+    } catch (err) {
+      console.error('WebRTC initialization failed:', err);
+      setError('Failed to initialize WebRTC');
+      cleanup();
+      return false;
+    }
+  };
+
+  const startCall = async () => {
+    if (!pc.current || !ws.current || ws.current.readyState !== WebSocket.OPEN) {
+      setError('Not connected to server');
+      return;
+    }
+
+    try {
+      const offer = await pc.current.createOffer();
+      await pc.current.setLocalDescription(offer);
+      ws.current.send(JSON.stringify({ sdp: offer }));
+      setIsCallActive(true);
+      setError('');
+    } catch (err) {
+      console.error('Error starting call:', err);
+      setError('Failed to start call');
+    }
+  };
+
+  const endCall = () => {
+    cleanup();
+  };
+
+  const joinRoom = async () => {
+    setError('');
+
+    if (!connectWebSocket()) {
+      return;
+    }
+
+    // Wait for WebSocket connection to establish
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    if (!(await initializeWebRTC())) {
+      return;
+    }
+  };
+
+  useEffect(() => {
+    // Auto-connect on component mount
+    joinRoom();
+
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+      }
+      cleanup();
+    };
+  }, []);
+
+  return (
+      <div className={styles.appContainer}>
+        <div className={styles.controlPanel}>
+          <div className={styles.connectionStatus}>
+            Status: {isConnected ? 'Connected' : 'Disconnected'}
+          </div>
+
+          <div className={styles.inputGroup}>
+            <label>Room:</label>
+            <input
+                type="text"
+                value={room}
+                onChange={(e) => setRoom(e.target.value)}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          </div>
+
+          <div className={styles.inputGroup}>
+            <label>Username:</label>
+            <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+            />
+          </div>
+
+          <button
+              onClick={joinRoom}
+              disabled={isConnected}
+              className={styles.button}
           >
-            Read our docs
-          </a>
+            {isConnected ? 'Joined' : 'Join Room'}
+          </button>
+
+          <div className={styles.userList}>
+            <h3>Users in room ({users.length}):</h3>
+            <ul>
+              {users.map((user, index) => (
+                  <li key={index}>{user}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className={styles.callControls}>
+            {!isCallActive ? (
+                <button
+                    onClick={startCall}
+                    disabled={!isConnected || users.length < 2}
+                    className={styles.button}
+                >
+                  Start Call
+                </button>
+            ) : (
+                <button
+                    onClick={endCall}
+                    className={styles.button}
+                >
+                  End Call
+                </button>
+            )}
+          </div>
+
+          {error && <div className={styles.errorMessage}>{error}</div>}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+        <div className={styles.videoContainer}>
+          <div className={styles.videoWrapper}>
+            <video
+                ref={localVideoRef}
+                autoPlay
+                muted
+                className={styles.localVideo}
+            />
+            <div className={styles.videoLabel}>You ({username})</div>
+          </div>
+
+          <div className={styles.videoWrapper}>
+            <video
+                ref={remoteVideoRef}
+                autoPlay
+                className={styles.remoteVideo}
+            />
+            <div className={styles.videoLabel}>Remote</div>
+          </div>
+        </div>
+      </div>
   );
 }
