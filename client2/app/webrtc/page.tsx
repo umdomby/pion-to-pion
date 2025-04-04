@@ -1,4 +1,4 @@
-//app\webrtc\page.tsx
+// file: client2/app/webrtc/page.tsx
 'use client'
 
 import { VideoCallApp } from './VideoCallApp';

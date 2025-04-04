@@ -1,12 +1,25 @@
 {
-  "name": "client",
+  "name": "ardu",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "concurrently \"nodemon --watch ./pages --watch ./app --watch ./components --exec 'next dev -p 3005'\" \"nodemon --watch server.ts --exec 'ts-node' server.ts\"",
+    "dev1": "concurrently \"next dev -p 3005\" \"ts-node server.ts\"",
+    "dev2": "next dev --turbopack",
     "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "start": "concurrently \"next start\" \"ts-node server.ts\"",
+    "ssl": "concurrently \"sudo node client-ssl.js\" \"sudo ts-node server-ssl.ts\"",
+    "cl": "sudo node client-ssl.js",
+    "sr": "sudo ts-node server.ts",
+    "lint": "next lint",
+    "test": "jest",
+    "prisma:push": "prisma db push",
+    "prisma:studio": "prisma studio",
+    "prisma:seed": "prisma db seed",
+    "postinstall": "prisma generate"
+  },
+  "prisma": {
+    "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
   },
   "dependencies": {
     "@faker-js/faker": "^9.6.0",
