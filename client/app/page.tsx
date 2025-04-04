@@ -1,12 +1,33 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, forwardRef } from 'react';
 import styles from './page.module.css';
+
+// Define video components directly in the same file to avoid import issues
+const LocalVideo = forwardRef<HTMLVideoElement>((props, ref) => (
+    <video
+        ref={ref}
+        autoPlay
+        muted
+        className={styles.localVideo}
+        {...props}
+    />
+));
+
+const RemoteVideo = forwardRef<HTMLVideoElement>((props, ref) => (
+    <video
+        ref={ref}
+        autoPlay
+        className={styles.remoteVideo}
+        {...props}
+    />
+));
 
 type User = string;
 
 export default function Home() {
-  const [username, setUsername] = useState(`User${Math.floor(Math.random() * 1000)}`);
+  const [isLoading, setIsLoading] = useState(true);
+  const [username, setUsername] = useState('');
   const [room, setRoom] = useState('room1');
   const [users, setUsers] = useState<User[]>([]);
   const [isCallActive, setIsCallActive] = useState(false);
@@ -19,7 +40,6 @@ export default function Home() {
   const pc = useRef<RTCPeerConnection | null>(null);
 
   const cleanup = () => {
-    // Close WebRTC connection
     if (pc.current) {
       pc.current.onicecandidate = null;
       pc.current.ontrack = null;
@@ -27,7 +47,6 @@ export default function Home() {
       pc.current = null;
     }
 
-    // Stop media streams
     if (localVideoRef.current?.srcObject) {
       (localVideoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
       localVideoRef.current.srcObject = null;
@@ -47,7 +66,6 @@ export default function Home() {
 
       ws.current.onopen = () => {
         setIsConnected(true);
-        // Send connection data (room and username)
         ws.current?.send(JSON.stringify({
           room,
           username
@@ -76,7 +94,6 @@ export default function Home() {
 
   const initializeWebRTC = async () => {
     try {
-      // Clean up previous connection
       if (pc.current) {
         cleanup();
       }
@@ -87,7 +104,6 @@ export default function Home() {
 
       pc.current = new RTCPeerConnection(config);
 
-      // Get video stream from camera
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
@@ -105,21 +121,18 @@ export default function Home() {
         return false;
       }
 
-      // Handle ICE candidates
       pc.current.onicecandidate = (event) => {
         if (event.candidate && ws.current?.readyState === WebSocket.OPEN) {
           ws.current.send(JSON.stringify({ ice: event.candidate }));
         }
       };
 
-      // Handle remote stream
       pc.current.ontrack = (event) => {
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = event.streams[0];
         }
       };
 
-      // Handle server messages
       ws.current.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -189,7 +202,6 @@ export default function Home() {
       return;
     }
 
-    // Wait for WebSocket connection to establish
     await new Promise(resolve => setTimeout(resolve, 500));
 
     if (!(await initializeWebRTC())) {
@@ -198,7 +210,8 @@ export default function Home() {
   };
 
   useEffect(() => {
-    // Auto-connect on component mount
+    setUsername(`User${Math.floor(Math.random() * 1000)}`);
+    setIsLoading(false);
     joinRoom();
 
     return () => {
@@ -208,6 +221,10 @@ export default function Home() {
       cleanup();
     };
   }, []);
+
+  if (isLoading) {
+    return <div className={styles.loading}>Loading...</div>;
+  }
 
   return (
       <div className={styles.appContainer}>
@@ -275,21 +292,12 @@ export default function Home() {
 
         <div className={styles.videoContainer}>
           <div className={styles.videoWrapper}>
-            <video
-                ref={localVideoRef}
-                autoPlay
-                muted
-                className={styles.localVideo}
-            />
+            <LocalVideo ref={localVideoRef} />
             <div className={styles.videoLabel}>You ({username})</div>
           </div>
 
           <div className={styles.videoWrapper}>
-            <video
-                ref={remoteVideoRef}
-                autoPlay
-                className={styles.remoteVideo}
-            />
+            <RemoteVideo ref={remoteVideoRef} />
             <div className={styles.videoLabel}>Remote</div>
           </div>
         </div>
