@@ -185,10 +185,19 @@ function App() {
   };
 
   const endCall = () => {
-    if (isCallInitiator && ws.current?.readyState === WebSocket.OPEN) {
+    if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ type: "end_call" }));
+      ws.current.close(); // Закрываем текущее соединение
     }
     cleanup();
+
+    // Сбрасываем состояние комнаты
+    setIsInRoom(false);
+
+    // Заново подключаемся через небольшой таймаут
+    setTimeout(() => {
+      connectWebSocket();
+    }, 300);
   };
 
   const joinRoom = async () => {
