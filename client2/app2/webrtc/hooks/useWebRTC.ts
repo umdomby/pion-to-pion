@@ -43,15 +43,6 @@ export const useWebRTC = (
         setIsCallActive(false);
     };
 
-    const leaveRoom = () => {
-        if (ws.current?.readyState === WebSocket.OPEN) {
-            ws.current.send(JSON.stringify({ type: 'leave' }));
-        }
-        cleanup();
-        setRemoteUsers([]);
-    };
-
-
     const connectWebSocket = () => {
         try {
             ws.current = new WebSocket('wss://anybet.site/ws');
@@ -221,7 +212,6 @@ export const useWebRTC = (
         joinRoom,
         isCallActive,
         isConnected,
-        leaveRoom,
         error
     };
 };

@@ -1,3 +1,4 @@
+// file: client2/app/webrtc/VideoCallApp.tsx
 'use client'
 
 import { useWebRTC } from './hooks/useWebRTC';
@@ -25,7 +26,6 @@ export const VideoCallApp = () => {
         startCall,
         endCall,
         joinRoom,
-        leaveRoom,
         isCallActive,
         isConnected,
         error
@@ -77,7 +77,6 @@ export const VideoCallApp = () => {
                         id="room"
                         value={roomId}
                         onChange={(e) => setRoomId(e.target.value)}
-                        disabled={isConnected}
                     />
                 </div>
 
@@ -87,41 +86,26 @@ export const VideoCallApp = () => {
                         id="username"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        disabled={isConnected}
                     />
                 </div>
 
-                {!isConnected ? (
-                    <Button
-                        onClick={joinRoom}
-                        className={styles.button}
-                    >
-                        Join Room
-                    </Button>
-                ) : (
-                    <Button
-                        onClick={() => {
-                            endCall();
-                            leaveRoom();
-                        }}
-                        className={styles.button}
-                        variant="destructive"
-                    >
-                        Leave Room
-                    </Button>
-                )}
+                <Button
+                    onClick={joinRoom}
+                    disabled={isConnected}
+                    className={styles.button}
+                >
+                    {isConnected ? 'Connected' : 'Join Room'}
+                </Button>
 
-                {isConnected && !isCallActive && (
+                {!isCallActive ? (
                     <Button
                         onClick={startCall}
-                        disabled={remoteUsers.length < 1}
+                        disabled={!isConnected || remoteUsers.length < 1}
                         className={styles.button}
                     >
                         Start Call
                     </Button>
-                )}
-
-                {isCallActive && (
+                ) : (
                     <Button
                         onClick={endCall}
                         className={styles.button}
