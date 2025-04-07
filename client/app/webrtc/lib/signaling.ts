@@ -13,7 +13,7 @@ export class SignalingClient {
     public onAnswer: (data: RTCSessionDescriptionInit) => void = () => {};
     public onCandidate: (data: RTCIceCandidateInit) => void = () => {};
     public onError: (error: string) => void = () => {};
-    public onLeave: (username: string) => void = () => {};
+    public onLeave: (username?: string) => void = () => {};
     public onJoin: (username: string) => void = () => {};
 
     constructor(
@@ -127,8 +127,8 @@ export class SignalingClient {
         return this.send({ type: 'candidate', candidate });
     }
 
-    public sendLeave(): Promise<void> {
-        return this.send({ type: 'leave' });
+    public sendLeave(username: string): Promise<void> {
+        return this.send({ type: 'leave', data: username });
     }
 
     private send(data: SignalingMessage): Promise<void> {
