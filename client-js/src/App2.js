@@ -8,6 +8,8 @@ function App() {
   const [isCallActive, setIsCallActive] = useState(false);
   const [error, setError] = useState('');
   const [isConnected, setIsConnected] = useState(false);
+  const [isInRoom, setIsInRoom] = useState(false);
+  const [shouldCreateRoom, setShouldCreateRoom] = useState(false);
 
   const localVideoRef = useRef();
   const remoteVideoRef = useRef();
@@ -15,7 +17,6 @@ function App() {
   const pc = useRef();
 
   const cleanup = () => {
-    // Закрываем WebRTC соединение
     if (pc.current) {
       pc.current.onicecandidate = null;
       pc.current.ontrack = null;
@@ -23,7 +24,6 @@ function App() {
       pc.current = null;
     }
 
-    // Останавливаем медиапотоки
     if (localVideoRef.current?.srcObject) {
       localVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
       localVideoRef.current.srcObject = null;
@@ -43,11 +43,7 @@ function App() {
 
       ws.current.onopen = () => {
         setIsConnected(true);
-        // Отправляем данные для подключения (комната и ник)
-        ws.current.send(JSON.stringify({
-          room,
-          username
-        }));
+        setError('');
       };
 
       ws.current.onerror = (error) => {
@@ -59,6 +55,7 @@ function App() {
       ws.current.onclose = () => {
         console.log('WebSocket disconnected');
         setIsConnected(false);
+        setIsInRoom(false);
         cleanup();
       };
 
@@ -72,7 +69,6 @@ function App() {
 
   const initializeWebRTC = async () => {
     try {
-      // Очищаем предыдущее соединение
       if (pc.current) {
         cleanup();
       }
@@ -83,7 +79,6 @@ function App() {
 
       pc.current = new RTCPeerConnection(config);
 
-      // Получаем видеопоток с камеры
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
@@ -101,21 +96,18 @@ function App() {
         return;
       }
 
-      // Обработка ICE кандидатов
       pc.current.onicecandidate = (event) => {
         if (event.candidate && ws.current?.readyState === WebSocket.OPEN) {
           ws.current.send(JSON.stringify({ ice: event.candidate }));
         }
       };
 
-      // Получаем удаленный поток
       pc.current.ontrack = (event) => {
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = event.streams[0];
         }
       };
 
-      // Обработка сообщений от сервера
       ws.current.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -181,21 +173,43 @@ function App() {
   const joinRoom = async () => {
     setError('');
 
-    if (!connectWebSocket()) {
-      return;
+    if (!isConnected) {
+      if (!connectWebSocket()) {
+        return;
+      }
+      // Wait for connection
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Даем время на установку WebSocket соединения
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Send join room request
+    ws.current.send(JSON.stringify({
+      room,
+      username,
+      create: shouldCreateRoom
+    }));
 
     if (!(await initializeWebRTC())) {
       return;
     }
+
+    setIsInRoom(true);
+  };
+
+  const leaveRoom = () => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        type: "leave",
+        room,
+        username
+      }));
+    }
+    setIsInRoom(false);
+    cleanup();
   };
 
   useEffect(() => {
-    // Автоподключение при монтировании
-    joinRoom();
+    // Connect to WebSocket on mount
+    connectWebSocket();
 
     return () => {
       if (ws.current) {
@@ -209,7 +223,7 @@ function App() {
       <div className="app-container">
         <div className="control-panel">
           <div className="connection-status">
-            Status: {isConnected ? 'Connected' : 'Disconnected'}
+            Status: {isConnected ? (isInRoom ? `In room ${room}` : 'Connected') : 'Disconnected'}
           </div>
 
           <div className="input-group">
@@ -218,6 +232,7 @@ function App() {
                 type="text"
                 value={room}
                 onChange={(e) => setRoom(e.target.value)}
+                disabled={isInRoom}
             />
           </div>
 
@@ -227,12 +242,30 @@ function App() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                disabled={isInRoom}
             />
           </div>
 
-          <button onClick={joinRoom} disabled={isConnected}>
-            {isConnected ? 'Joined' : 'Join Room'}
-          </button>
+          {!isInRoom && (
+              <div className="input-group">
+                <label>
+                  <input
+                      type="checkbox"
+                      checked={shouldCreateRoom}
+                      onChange={(e) => setShouldCreateRoom(e.target.checked)}
+                  />
+                  Create new room
+                </label>
+              </div>
+          )}
+
+          {!isInRoom ? (
+              <button onClick={joinRoom} disabled={!isConnected}>
+                {shouldCreateRoom ? 'Create Room' : 'Join Room'}
+              </button>
+          ) : (
+              <button onClick={leaveRoom}>Leave Room</button>
+          )}
 
           <div className="user-list">
             <h3>Users in room ({users.length}):</h3>
@@ -245,7 +278,7 @@ function App() {
 
           <div className="call-controls">
             {!isCallActive ? (
-                <button onClick={startCall} disabled={!isConnected || users.length < 2}>
+                <button onClick={startCall} disabled={!isInRoom || users.length < 2}>
                   Start Call
                 </button>
             ) : (
