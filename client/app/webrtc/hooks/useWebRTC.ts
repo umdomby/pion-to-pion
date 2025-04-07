@@ -22,6 +22,14 @@ export const useWebRTC = (
     const ws = useRef<WebSocket | null>(null);
     const pc = useRef<RTCPeerConnection | null>(null);
 
+    useEffect(() => {
+        // Автоматически устанавливаем isCallActive в true, если есть удаленный поток
+        const hasRemoteStream = remoteUsers.some(user => user.stream);
+        if (hasRemoteStream && !isCallActive) {
+            setIsCallActive(true);
+        }
+    }, [remoteUsers]);
+
     const cleanup = () => {
         if (pc.current) {
             pc.current.onicecandidate = null;
