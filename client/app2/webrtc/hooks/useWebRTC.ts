@@ -1,4 +1,4 @@
-// file: client2/app/webrtc/hooks/useWebRTC.ts
+// file: client/app/webrtc/hooks/useWebRTC.ts
 import { useEffect, useRef, useState } from 'react';
 
 interface WebSocketMessage {

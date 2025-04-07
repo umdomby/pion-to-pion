@@ -1,4 +1,4 @@
-// file: client2/app/webrtc/types.ts
+// file: client/app/webrtc/types.ts
 export interface RoomInfo {
     users: string[];
 }
@@ -8,9 +8,7 @@ export type SignalingMessage =
     | { type: 'error'; data: string }
     | { type: 'offer'; sdp: RTCSessionDescriptionInit }
     | { type: 'answer'; sdp: RTCSessionDescriptionInit }
-    | { type: 'candidate'; candidate: RTCIceCandidateInit }
-    | { type: 'join'; data: string }
-    | { type: 'leave'; data: string };
+    | { type: 'candidate'; candidate: RTCIceCandidateInit };
 
 export interface User {
     username: string;

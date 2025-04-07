@@ -1,4 +1,4 @@
-// file: client2/app/webrtc/VideoCallApp.tsx
+// file: client/app/webrtc/VideoCallApp.tsx
 'use client'
 
 import { useWebRTC } from './hooks/useWebRTC';

@@ -1,4 +1,4 @@
-// file: client2/app/webrtc/lib/signaling.ts
+// file: client/app/webrtc/lib/signaling.ts
 import { RoomInfo, SignalingMessage, SignalingClientOptions } from '../types';
 
 export class SignalingClient {
