@@ -1,3 +1,4 @@
+// file: client2/app/webrtc/lib/signaling.ts
 import { RoomInfo, SignalingMessage, SignalingClientOptions } from '../types';
 
 export class SignalingClient {
@@ -13,6 +14,7 @@ export class SignalingClient {
     public onCandidate: (data: RTCIceCandidateInit) => void = () => {};
     public onError: (error: string) => void = () => {};
     public onLeave: (username: string) => void = () => {};
+    public onJoin: (username: string) => void = () => {};
 
     constructor(
         private url: string,
@@ -50,6 +52,7 @@ export class SignalingClient {
 
             this.ws!.onopen = () => {
                 this.ws!.send(JSON.stringify({
+                    type: 'join',
                     room: roomId,
                     username: username
                 }));
@@ -89,6 +92,9 @@ export class SignalingClient {
                         break;
                     case 'leave':
                         this.onLeave(message.data);
+                        break;
+                    case 'join':
+                        this.onJoin(message.data);
                         break;
                     default:
                         console.warn('Unknown message type:', message);

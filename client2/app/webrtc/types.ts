@@ -8,7 +8,9 @@ export type SignalingMessage =
     | { type: 'error'; data: string }
     | { type: 'offer'; sdp: RTCSessionDescriptionInit }
     | { type: 'answer'; sdp: RTCSessionDescriptionInit }
-    | { type: 'candidate'; candidate: RTCIceCandidateInit };
+    | { type: 'candidate'; candidate: RTCIceCandidateInit }
+    | { type: 'join'; data: string }
+    | { type: 'leave'; data: string };
 
 export interface User {
     username: string;

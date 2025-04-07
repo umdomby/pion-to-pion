@@ -51,7 +51,6 @@ export const useWebRTC = (
         setRemoteUsers([]);
     };
 
-
     const connectWebSocket = () => {
         try {
             ws.current = new WebSocket('wss://anybet.site/ws');
@@ -59,6 +58,7 @@ export const useWebRTC = (
             ws.current.onopen = () => {
                 setIsConnected(true);
                 ws.current?.send(JSON.stringify({
+                    type: 'join',
                     room: roomId,
                     username
                 }));
@@ -74,6 +74,53 @@ export const useWebRTC = (
                 console.log('WebSocket disconnected');
                 setIsConnected(false);
                 cleanup();
+            };
+
+            ws.current.onmessage = async (event) => {
+                try {
+                    const data: WebSocketMessage = JSON.parse(event.data);
+
+                    if (data.type === 'room_info') {
+                        setRemoteUsers(
+                            data.data.users
+                                .filter((u: string) => u !== username)
+                                .map((u: string) => ({ username: u }))
+                        );
+                    }
+                    else if (data.type === 'join') {
+                        setRemoteUsers(prev => {
+                            if (prev.some(user => user.username === data.data)) {
+                                return prev;
+                            }
+                            return [...prev, { username: data.data }];
+                        });
+                    }
+                    else if (data.type === 'leave') {
+                        setRemoteUsers(prev =>
+                            prev.filter(user => user.username !== data.data)
+                        );
+                    }
+                    else if (data.type === 'error') {
+                        setError(data.data);
+                    } else if (data.sdp && pc.current) {
+                        await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                        if (data.sdp.type === 'offer') {
+                            const answer = await pc.current.createAnswer();
+                            await pc.current.setLocalDescription(answer);
+                            if (ws.current?.readyState === WebSocket.OPEN) {
+                                ws.current.send(JSON.stringify({ sdp: answer }));
+                            }
+                        }
+                    } else if (data.ice && pc.current) {
+                        try {
+                            await pc.current.addIceCandidate(new RTCIceCandidate(data.ice));
+                        } catch (e) {
+                            console.error('Error adding ICE candidate:', e);
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error processing message:', err);
+                }
             };
 
             return true;
@@ -123,43 +170,9 @@ export const useWebRTC = (
                 });
             };
 
-            // Добавьте проверку на существование ws.current
             if (!ws.current) {
                 throw new Error('WebSocket connection not established');
             }
-
-            ws.current.onmessage = async (event) => {
-                try {
-                    const data: WebSocketMessage = JSON.parse(event.data);
-
-                    if (data.type === 'room_info') {
-                        setRemoteUsers(
-                            data.data.users
-                                .filter((u: string) => u !== username)
-                                .map((u: string) => ({ username: u }))
-                        );
-                    } else if (data.type === 'error') {
-                        setError(data.data);
-                    } else if (data.sdp && pc.current) {
-                        await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-                        if (data.sdp.type === 'offer') {
-                            const answer = await pc.current.createAnswer();
-                            await pc.current.setLocalDescription(answer);
-                            if (ws.current?.readyState === WebSocket.OPEN) {
-                                ws.current.send(JSON.stringify({ sdp: answer }));
-                            }
-                        }
-                    } else if (data.ice && pc.current) {
-                        try {
-                            await pc.current.addIceCandidate(new RTCIceCandidate(data.ice));
-                        } catch (e) {
-                            console.error('Error adding ICE candidate:', e);
-                        }
-                    }
-                } catch (err) {
-                    console.error('Error processing message:', err);
-                }
-            };
 
             return true;
         } catch (err) {
