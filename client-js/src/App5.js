@@ -9,6 +9,7 @@ function App() {
   const [error, setError] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isInRoom, setIsInRoom] = useState(false);
+  const [shouldCreateRoom, setShouldCreateRoom] = useState(false);
 
   const localVideoRef = useRef();
   const remoteVideoRef = useRef();
@@ -29,7 +30,7 @@ function App() {
     }
 
     if (remoteVideoRef.current?.srcObject) {
-      remoteVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
+      remoteVideoRef.current.srcObject?.getTracks().forEach(track => track.stop());
       remoteVideoRef.current.srcObject = null;
     }
 
@@ -68,9 +69,7 @@ function App() {
 
   const initializeWebRTC = async () => {
     try {
-      if (pc.current) {
-        cleanup();
-      }
+      cleanup(); // Полная очистка перед инициализацией
 
       const config = {
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -92,7 +91,7 @@ function App() {
       } catch (err) {
         console.error('Error accessing media devices:', err);
         setError('Could not access camera/microphone');
-        return;
+        return false;
       }
 
       pc.current.onicecandidate = (event) => {
@@ -102,39 +101,8 @@ function App() {
       };
 
       pc.current.ontrack = (event) => {
-        if (remoteVideoRef.current) {
+        if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
           remoteVideoRef.current.srcObject = event.streams[0];
-        }
-      };
-
-      ws.current.onmessage = async (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === 'room_info') {
-            setUsers(data.data.users);
-          }
-          else if (data.type === 'error') {
-            setError(data.data);
-          }
-          else if (data.sdp && pc.current) {
-            await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            if (data.sdp.type === 'offer') {
-              const answer = await pc.current.createAnswer();
-              await pc.current.setLocalDescription(answer);
-              if (ws.current?.readyState === WebSocket.OPEN) {
-                ws.current.send(JSON.stringify({ sdp: answer }));
-              }
-            }
-          } else if (data.ice && pc.current) {
-            try {
-              await pc.current.addIceCandidate(new RTCIceCandidate(data.ice));
-            } catch (e) {
-              console.error('Error adding ICE candidate:', e);
-            }
-          }
-        } catch (err) {
-          console.error('Error processing message:', err);
         }
       };
 
@@ -145,6 +113,41 @@ function App() {
       cleanup();
       return false;
     }
+  };
+
+  const setupMessageHandler = () => {
+    if (!ws.current) return;
+
+    ws.current.onmessage = async (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'room_info') {
+          setUsers(data.data.users);
+        }
+        else if (data.type === 'error') {
+          setError(data.data);
+        }
+        else if (data.sdp && pc.current) {
+          await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          if (data.sdp.type === 'offer') {
+            const answer = await pc.current.createAnswer();
+            await pc.current.setLocalDescription(answer);
+            if (ws.current?.readyState === WebSocket.OPEN) {
+              ws.current.send(JSON.stringify({ sdp: answer }));
+            }
+          }
+        } else if (data.ice && pc.current) {
+          try {
+            await pc.current.addIceCandidate(new RTCIceCandidate(data.ice));
+          } catch (e) {
+            console.error('Error adding ICE candidate:', e);
+          }
+        }
+      } catch (err) {
+        console.error('Error processing message:', err);
+      }
+    };
   };
 
   const startCall = async () => {
@@ -171,24 +174,26 @@ function App() {
 
   const joinRoom = async () => {
     setError('');
+    cleanup();
 
     if (!isConnected) {
       if (!connectWebSocket()) {
         return;
       }
-      // Wait for connection
       await new Promise(resolve => setTimeout(resolve, 500));
     }
-
-    // Send join room request
-    ws.current.send(JSON.stringify({
-      room,
-      username
-    }));
 
     if (!(await initializeWebRTC())) {
       return;
     }
+
+    setupMessageHandler();
+
+    ws.current.send(JSON.stringify({
+      room,
+      username,
+      create: shouldCreateRoom
+    }));
 
     setIsInRoom(true);
   };
@@ -206,7 +211,6 @@ function App() {
   };
 
   useEffect(() => {
-    // Connect to WebSocket on mount
     connectWebSocket();
 
     return () => {
@@ -244,9 +248,22 @@ function App() {
             />
           </div>
 
+          {!isInRoom && (
+              <div className="input-group">
+                <label>
+                  <input
+                      type="checkbox"
+                      checked={shouldCreateRoom}
+                      onChange={(e) => setShouldCreateRoom(e.target.checked)}
+                  />
+                  Create new room
+                </label>
+              </div>
+          )}
+
           {!isInRoom ? (
               <button onClick={joinRoom} disabled={!isConnected}>
-                Join Room
+                {shouldCreateRoom ? 'Create Room' : 'Join Room'}
               </button>
           ) : (
               <button onClick={leaveRoom}>Leave Room</button>

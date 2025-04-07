@@ -9,6 +9,7 @@ function App() {
   const [error, setError] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isInRoom, setIsInRoom] = useState(false);
+  const [shouldCreateRoom, setShouldCreateRoom] = useState(false);
 
   const localVideoRef = useRef();
   const remoteVideoRef = useRef();
@@ -176,19 +177,18 @@ function App() {
       if (!connectWebSocket()) {
         return;
       }
-      // Wait for connection
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-
-    // Send join room request
-    ws.current.send(JSON.stringify({
-      room,
-      username
-    }));
 
     if (!(await initializeWebRTC())) {
       return;
     }
+
+    ws.current.send(JSON.stringify({
+      room,
+      username,
+      create: shouldCreateRoom
+    }));
 
     setIsInRoom(true);
   };
@@ -206,7 +206,6 @@ function App() {
   };
 
   useEffect(() => {
-    // Connect to WebSocket on mount
     connectWebSocket();
 
     return () => {
@@ -244,9 +243,22 @@ function App() {
             />
           </div>
 
+          {!isInRoom && (
+              <div className="input-group">
+                <label>
+                  <input
+                      type="checkbox"
+                      checked={shouldCreateRoom}
+                      onChange={(e) => setShouldCreateRoom(e.target.checked)}
+                  />
+                  Create new room
+                </label>
+              </div>
+          )}
+
           {!isInRoom ? (
               <button onClick={joinRoom} disabled={!isConnected}>
-                Join Room
+                {shouldCreateRoom ? 'Create Room' : 'Join Room'}
               </button>
           ) : (
               <button onClick={leaveRoom}>Leave Room</button>
@@ -263,7 +275,7 @@ function App() {
 
           <div className="call-controls">
             {!isCallActive ? (
-                <button onClick={startCall} disabled={!isInRoom || users.length < 2}>
+                <button onClick={startCall} disabled={!isInRoom}>
                   Start Call
                 </button>
             ) : (
