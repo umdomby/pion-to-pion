@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -29,10 +28,10 @@ type RoomInfo struct {
 }
 
 var (
-	peers     = make(map[string]*Peer) // key: conn.RemoteAddr().String()
-	rooms     = make(map[string]map[string]*Peer) // key: room name
-	mu        sync.Mutex
-	letters   = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	peers   = make(map[string]*Peer) // key: conn.RemoteAddr().String()
+	rooms   = make(map[string]map[string]*Peer) // key: room name
+	mu      sync.Mutex
+	letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 )
 
 func init() {
@@ -47,9 +46,33 @@ func randSeq(n int) string {
 	return string(b)
 }
 
+func logStatus() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	log.Printf("Current status - Total connections: %d, Total rooms: %d", len(peers), len(rooms))
+	for room, roomPeers := range rooms {
+		log.Printf("Room '%s' has %d users: %v", room, len(roomPeers), getUsernames(roomPeers))
+	}
+}
+
+func getUsernames(peers map[string]*Peer) []string {
+	usernames := make([]string, 0, len(peers))
+	for username := range peers {
+		usernames = append(usernames, username)
+	}
+	return usernames
+}
+
 func main() {
 	http.HandleFunc("/ws", handleWebSocket)
-	fmt.Println("Сервер запущен на :8080")
+	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		logStatus()
+		w.Write([]byte("Status logged to console"))
+	})
+
+	log.Println("Сервер запущен на :8080")
+	logStatus()
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
@@ -61,6 +84,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	remoteAddr := conn.RemoteAddr().String()
+	log.Printf("New connection from: %s", remoteAddr)
+
 	// Получаем начальные данные (комнату и ник)
 	var initData struct {
 		Room     string `json:"room"`
@@ -68,14 +94,18 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	err = conn.ReadJSON(&initData)
 	if err != nil {
-		log.Println("Read init data error:", err)
+		log.Printf("Read init data error from %s: %v", remoteAddr, err)
 		return
 	}
+
+	log.Printf("Connection %s trying to join room '%s' as '%s'", remoteAddr, initData.Room, initData.Username)
 
 	// Проверяем уникальность ника в комнате
 	mu.Lock()
 	if roomPeers, exists := rooms[initData.Room]; exists {
+		log.Printf("Room '%s' already exists with %d users", initData.Room, len(roomPeers))
 		if _, userExists := roomPeers[initData.Username]; userExists {
+			log.Printf("Username '%s' already exists in room '%s'", initData.Username, initData.Room)
 			conn.WriteJSON(map[string]interface{}{
 				"type": "error",
 				"data": "Username already exists in this room",
@@ -83,6 +113,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			mu.Unlock()
 			return
 		}
+	} else {
+		log.Printf("Creating new room: '%s'", initData.Room)
 	}
 	mu.Unlock()
 
@@ -93,7 +125,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	peerConnection, err := webrtc.NewPeerConnection(config)
 	if err != nil {
-		log.Println("PeerConnection error:", err)
+		log.Printf("PeerConnection error for %s: %v", remoteAddr, err)
 		return
 	}
 
@@ -110,8 +142,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		rooms[initData.Room] = make(map[string]*Peer)
 	}
 	rooms[initData.Room][initData.Username] = peer
-	peers[conn.RemoteAddr().String()] = peer
+	peers[remoteAddr] = peer
 	mu.Unlock()
+
+	log.Printf("User '%s' joined room '%s' (connection: %s)", initData.Username, initData.Room, remoteAddr)
+	logStatus()
 
 	// Отправляем информацию о комнате
 	sendRoomInfo(initData.Room)
@@ -120,22 +155,33 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			log.Println("Read error:", err)
+			log.Printf("Connection closed by %s (user: '%s', room: '%s'): %v", remoteAddr, initData.Username, initData.Room, err)
 			break
 		}
 
 		var data map[string]interface{}
 		if err := json.Unmarshal(msg, &data); err != nil {
-			log.Println("JSON unmarshal error:", err)
+			log.Printf("JSON unmarshal error from %s: %v", remoteAddr, err)
 			continue
 		}
 
+		// Логируем WebRTC события
+        isRTCMessage := data["sdp"] != nil
+        if isRTCMessage {
+            log.Printf("WebRTC SDP message from %s (user: '%s')", remoteAddr, initData.Username)
+        } else if data["ice"] != nil {
+            log.Printf("WebRTC ICE candidate from %s (user: '%s')", remoteAddr, initData.Username)
+        }
+
 		// Передаем только WebRTC данные другим участникам комнаты
-		if _, isRTCMessage := data["sdp"]; isRTCMessage || data["ice"] != nil {
+		if isRTCMessage || data["ice"] != nil {
 			mu.Lock()
 			for username, p := range rooms[peer.room] {
 				if username != peer.username {
-					p.conn.WriteMessage(websocket.TextMessage, msg)
+					err := p.conn.WriteMessage(websocket.TextMessage, msg)
+					if err != nil {
+						log.Printf("Error sending message to %s (user: '%s'): %v", p.conn.RemoteAddr().String(), username, err)
+					}
 				}
 			}
 			mu.Unlock()
@@ -144,12 +190,16 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Удаляем при отключении
 	mu.Lock()
-	delete(peers, conn.RemoteAddr().String())
+	delete(peers, remoteAddr)
 	delete(rooms[peer.room], peer.username)
 	if len(rooms[peer.room]) == 0 {
 		delete(rooms, peer.room)
+		log.Printf("Room '%s' is now empty and has been removed", peer.room)
 	}
 	mu.Unlock()
+
+	log.Printf("User '%s' left room '%s' (connection: %s closed)", peer.username, peer.room, remoteAddr)
+	logStatus()
 
 	// Обновляем информацию о комнате
 	sendRoomInfo(peer.room)
@@ -168,26 +218,13 @@ func sendRoomInfo(room string) {
 		roomInfo := RoomInfo{Users: users}
 
 		for _, peer := range roomPeers {
-			peer.conn.WriteJSON(map[string]interface{}{
+			err := peer.conn.WriteJSON(map[string]interface{}{
 				"type": "room_info",
 				"data": roomInfo,
 			})
+			if err != nil {
+				log.Printf("Error sending room info to %s: %v", peer.conn.RemoteAddr().String(), err)
+			}
 		}
 	}
-}
-
-func listRooms(w http.ResponseWriter, r *http.Request) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	roomList := make(map[string][]string)
-	for room, peers := range rooms {
-		users := make([]string, 0, len(peers))
-		for user := range peers {
-			users = append(users, user)
-		}
-		roomList[room] = users
-	}
-
-	json.NewEncoder(w).Encode(roomList)
 }
