@@ -9,6 +9,7 @@ function App() {
   const [error, setError] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isInRoom, setIsInRoom] = useState(false);
+  const [isCallInitiator, setIsCallInitiator] = useState(false);
 
   const localVideoRef = useRef();
   const remoteVideoRef = useRef();
@@ -34,6 +35,7 @@ function App() {
     }
 
     setIsCallActive(false);
+    setIsCallInitiator(false);
   };
 
   const connectWebSocket = () => {
@@ -56,6 +58,50 @@ function App() {
         setIsConnected(false);
         setIsInRoom(false);
         cleanup();
+      };
+
+      ws.current.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'room_info') {
+            setUsers(data.data.users);
+          }
+          else if (data.type === 'error') {
+            setError(data.data);
+          }
+          else if (data.type === 'start_call') {
+            // Если звонок начал другой пользователь
+            if (!isCallActive && pc.current) {
+              const offer = await pc.current.createOffer();
+              await pc.current.setLocalDescription(offer);
+              ws.current.send(JSON.stringify({ sdp: offer }));
+              setIsCallActive(true);
+            }
+          }
+          else if (data.sdp && pc.current) {
+            try {
+              await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+              if (data.sdp.type === 'offer') {
+                const answer = await pc.current.createAnswer();
+                await pc.current.setLocalDescription(answer);
+                ws.current.send(JSON.stringify({ sdp: answer }));
+              }
+            } catch (err) {
+              console.error('Error processing SDP:', err);
+              setError('Error processing call data');
+            }
+          } else if (data.ice && pc.current) {
+            try {
+              await pc.current.addIceCandidate(new RTCIceCandidate(data.ice));
+            } catch (e) {
+              console.error('Error adding ICE candidate:', e);
+            }
+          }
+        } catch (err) {
+          console.error('Error processing message:', err);
+          setError('Error processing server message');
+        }
       };
 
       return true;
@@ -107,37 +153,6 @@ function App() {
         }
       };
 
-      ws.current.onmessage = async (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === 'room_info') {
-            setUsers(data.data.users);
-          }
-          else if (data.type === 'error') {
-            setError(data.data);
-          }
-          else if (data.sdp && pc.current) {
-            await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            if (data.sdp.type === 'offer') {
-              const answer = await pc.current.createAnswer();
-              await pc.current.setLocalDescription(answer);
-              if (ws.current?.readyState === WebSocket.OPEN) {
-                ws.current.send(JSON.stringify({ sdp: answer }));
-              }
-            }
-          } else if (data.ice && pc.current) {
-            try {
-              await pc.current.addIceCandidate(new RTCIceCandidate(data.ice));
-            } catch (e) {
-              console.error('Error adding ICE candidate:', e);
-            }
-          }
-        } catch (err) {
-          console.error('Error processing message:', err);
-        }
-      };
-
       return true;
     } catch (err) {
       console.error('WebRTC initialization failed:', err);
@@ -154,10 +169,14 @@ function App() {
     }
 
     try {
+      // Уведомляем сервер о начале звонка
+      ws.current.send(JSON.stringify({ type: "start_call" }));
+
       const offer = await pc.current.createOffer();
       await pc.current.setLocalDescription(offer);
       ws.current.send(JSON.stringify({ sdp: offer }));
       setIsCallActive(true);
+      setIsCallInitiator(true);
       setError('');
     } catch (err) {
       console.error('Error starting call:', err);
@@ -166,6 +185,9 @@ function App() {
   };
 
   const endCall = () => {
+    if (isCallInitiator && ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: "end_call" }));
+    }
     cleanup();
   };
 
@@ -176,11 +198,11 @@ function App() {
       if (!connectWebSocket()) {
         return;
       }
-      // Wait for connection
+      // Ждем подключения
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Send join room request
+    // Отправляем запрос на подключение к комнате
     ws.current.send(JSON.stringify({
       room,
       username
@@ -206,7 +228,7 @@ function App() {
   };
 
   useEffect(() => {
-    // Connect to WebSocket on mount
+    // Подключаемся к WebSocket при монтировании
     connectWebSocket();
 
     return () => {
