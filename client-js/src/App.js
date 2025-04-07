@@ -3,6 +3,7 @@ import './App.css';
 
 function App() {
   const [username, setUsername] = useState(`User${Math.floor(Math.random() * 1000)}`);
+  const [originalUsername, setOriginalUsername] = useState('');
   const [room, setRoom] = useState('room1');
   const [users, setUsers] = useState([]);
   const [isCallActive, setIsCallActive] = useState(false);
@@ -15,6 +16,10 @@ function App() {
   const remoteVideoRef = useRef();
   const ws = useRef();
   const pc = useRef();
+
+  const generateUniqueUsername = (base) => {
+    return `${base}_${Math.floor(Math.random() * 1000)}`;
+  };
 
   const cleanup = () => {
     if (pc.current) {
@@ -45,12 +50,6 @@ function App() {
       ws.current.onopen = () => {
         setIsConnected(true);
         setError('');
-        if (isInRoom) {
-          ws.current.send(JSON.stringify({
-            type: "get_users",
-            room
-          }));
-        }
       };
 
       ws.current.onerror = (error) => {
@@ -68,7 +67,7 @@ function App() {
         try {
           const data = JSON.parse(event.data);
 
-          if (data.type === 'room_info' || data.type === 'users_update') {
+          if (data.type === 'room_info') {
             setUsers(data.data.users || []);
           }
           else if (data.type === 'error') {
@@ -210,9 +209,18 @@ function App() {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
+    // Сохраняем оригинальное имя пользователя
+    if (!originalUsername) {
+      setOriginalUsername(username);
+    }
+
+    // Генерируем уникальное имя пользователя для повторного входа
+    const uniqueUsername = generateUniqueUsername(originalUsername || username);
+    setUsername(uniqueUsername);
+
     ws.current.send(JSON.stringify({
       room,
-      username
+      username: uniqueUsername
     }));
 
     if (!(await initializeWebRTC())) {
@@ -237,6 +245,10 @@ function App() {
 
     setTimeout(() => {
       connectWebSocket();
+      // При переподключении используем оригинальное имя с новым суффиксом
+      if (originalUsername) {
+        setUsername(generateUniqueUsername(originalUsername));
+      }
     }, 300);
   };
 
