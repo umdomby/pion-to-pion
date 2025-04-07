@@ -22,17 +22,10 @@ type Peer struct {
 	pc       *webrtc.PeerConnection
 	username string
 	room     string
-	isStreaming bool
 }
 
 type RoomInfo struct {
 	Users []string `json:"users"`
-	StreamingUsers []string `json:"streamingUsers"`
-}
-
-type Message struct {
-	Type string      `json:"type"`
-	Data interface{} `json:"data"`
 }
 
 var (
@@ -74,7 +67,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Получаем начальные данные (комнату и ник)
 	var initData struct {
-		Action   string `json:"action"`
 		Room     string `json:"room"`
 		Username string `json:"username"`
 	}
@@ -84,17 +76,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if initData.Action != "join" {
-		return
-	}
-
 	// Проверяем уникальность ника в комнате
 	mu.Lock()
 	if roomPeers, exists := rooms[initData.Room]; exists {
 		if _, userExists := roomPeers[initData.Username]; userExists {
-			conn.WriteJSON(Message{
-				Type: "error",
-				Data: "Username already exists in this room",
+			conn.WriteJSON(map[string]interface{}{
+				"type": "error",
+				"data": "Username already exists in this room",
 			})
 			mu.Unlock()
 			return
@@ -118,7 +106,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		pc:       peerConnection,
 		username: initData.Username,
 		room:     initData.Room,
-		isStreaming: false,
 	}
 
 	// Добавляем в комнату
@@ -147,41 +134,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Обработка выхода из комнаты
-		if action, ok := data["action"]; ok && action == "leave" {
-			break
-		}
-
-		// Обработка старта трансляции
-		if action, ok := data["action"]; ok && action == "start_stream" {
-			mu.Lock()
-			peer.isStreaming = true
-			mu.Unlock()
-			sendRoomInfo(peer.room)
-			continue
-		}
-
-		// Обработка завершения трансляции
-		if action, ok := data["action"]; ok && action == "end_stream" {
-			mu.Lock()
-			peer.isStreaming = false
-			mu.Unlock()
-			sendRoomInfo(peer.room)
-
-			// Отправляем уведомление о завершении трансляции
-			mu.Lock()
-			for username, p := range rooms[peer.room] {
-				if username != peer.username {
-					p.conn.WriteJSON(Message{
-						Type: "stream_ended",
-						Data: peer.username,
-					})
-				}
-			}
-			mu.Unlock()
-			continue
-		}
-
 		// Передаем только WebRTC данные другим участникам комнаты
 		if _, isRTCMessage := data["sdp"]; isRTCMessage || data["ice"] != nil {
 			mu.Lock()
@@ -200,14 +152,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	delete(rooms[peer.room], peer.username)
 	if len(rooms[peer.room]) == 0 {
 		delete(rooms, peer.room)
-	} else {
-		// Отправляем уведомление о выходе пользователя
-		for _, p := range rooms[peer.room] {
-			p.conn.WriteJSON(Message{
-				Type: "user_left",
-				Data: peer.username,
-			})
-		}
 	}
 	mu.Unlock()
 
@@ -221,23 +165,16 @@ func sendRoomInfo(room string) {
 
 	if roomPeers, exists := rooms[room]; exists {
 		users := make([]string, 0, len(roomPeers))
-		streamingUsers := make([]string, 0)
-		for username, peer := range roomPeers {
+		for username := range roomPeers {
 			users = append(users, username)
-			if peer.isStreaming {
-				streamingUsers = append(streamingUsers, username)
-			}
 		}
 
-		roomInfo := RoomInfo{
-			Users: users,
-			StreamingUsers: streamingUsers,
-		}
+		roomInfo := RoomInfo{Users: users}
 
 		for _, peer := range roomPeers {
-			peer.conn.WriteJSON(Message{
-				Type: "room_info",
-				Data: roomInfo,
+			peer.conn.WriteJSON(map[string]interface{}{
+				"type": "room_info",
+				"data": roomInfo,
 			})
 		}
 	}
@@ -247,20 +184,13 @@ func listRooms(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	roomList := make(map[string]RoomInfo)
+	roomList := make(map[string][]string)
 	for room, peers := range rooms {
 		users := make([]string, 0, len(peers))
-		streamingUsers := make([]string, 0)
-		for user, peer := range peers {
+		for user := range peers {
 			users = append(users, user)
-			if peer.isStreaming {
-				streamingUsers = append(streamingUsers, user)
-			}
 		}
-		roomList[room] = RoomInfo{
-			Users: users,
-			StreamingUsers: streamingUsers,
-		}
+		roomList[room] = users
 	}
 
 	json.NewEncoder(w).Encode(roomList)
