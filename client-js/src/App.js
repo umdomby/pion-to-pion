@@ -66,25 +66,18 @@ function App() {
 
           if (data.type === 'room_info') {
             setUsers(data.data.users);
-            // Если пользователей в комнате нет, выходим
-            if (data.data.users.length === 0) {
-              setIsInRoom(false);
-              cleanup();
-            }
           }
           else if (data.type === 'error') {
             setError(data.data);
           }
           else if (data.type === 'start_call') {
+            // Если звонок начал другой пользователь
             if (!isCallActive && pc.current) {
               const offer = await pc.current.createOffer();
               await pc.current.setLocalDescription(offer);
               ws.current.send(JSON.stringify({ sdp: offer }));
               setIsCallActive(true);
             }
-          }
-          else if (data.type === 'end_call') {
-            cleanup();
           }
           else if (data.sdp && pc.current) {
             try {
@@ -176,6 +169,7 @@ function App() {
     }
 
     try {
+      // Уведомляем сервер о начале звонка
       ws.current.send(JSON.stringify({ type: "start_call" }));
 
       const offer = await pc.current.createOffer();
@@ -191,9 +185,7 @@ function App() {
   };
 
   const endCall = () => {
-    if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ type: "end_call" }));
-    }
     cleanup();
   };
 
@@ -204,9 +196,11 @@ function App() {
       if (!connectWebSocket()) {
         return;
       }
+      // Ждем подключения
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
+    // Отправляем запрос на подключение к комнате
     ws.current.send(JSON.stringify({
       room,
       username
@@ -232,6 +226,7 @@ function App() {
   };
 
   useEffect(() => {
+    // Подключаемся к WebSocket при монтировании
     connectWebSocket();
 
     return () => {
