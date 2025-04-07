@@ -9,7 +9,6 @@ function App() {
   const [error, setError] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isInRoom, setIsInRoom] = useState(false);
-  const [shouldCreateRoom, setShouldCreateRoom] = useState(false);
 
   const localVideoRef = useRef();
   const remoteVideoRef = useRef();
@@ -184,8 +183,7 @@ function App() {
     // Send join room request
     ws.current.send(JSON.stringify({
       room,
-      username,
-      create: shouldCreateRoom
+      username
     }));
 
     if (!(await initializeWebRTC())) {
@@ -246,22 +244,9 @@ function App() {
             />
           </div>
 
-          {!isInRoom && (
-              <div className="input-group">
-                <label>
-                  <input
-                      type="checkbox"
-                      checked={shouldCreateRoom}
-                      onChange={(e) => setShouldCreateRoom(e.target.checked)}
-                  />
-                  Create new room
-                </label>
-              </div>
-          )}
-
           {!isInRoom ? (
               <button onClick={joinRoom} disabled={!isConnected}>
-                {shouldCreateRoom ? 'Create Room' : 'Join Room'}
+                Join Room
               </button>
           ) : (
               <button onClick={leaveRoom}>Leave Room</button>
