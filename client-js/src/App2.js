@@ -3,6 +3,7 @@ import './App.css';
 
 function App() {
   const [username, setUsername] = useState(`User${Math.floor(Math.random() * 1000)}`);
+  const [originalUsername, setOriginalUsername] = useState('');
   const [room, setRoom] = useState('room1');
   const [users, setUsers] = useState([]);
   const [isCallActive, setIsCallActive] = useState(false);
@@ -15,6 +16,10 @@ function App() {
   const remoteVideoRef = useRef();
   const ws = useRef();
   const pc = useRef();
+
+  const generateUniqueUsername = (base) => {
+    return `${base}_${Math.floor(Math.random() * 1000)}`;
+  };
 
   const cleanup = () => {
     if (pc.current) {
@@ -56,8 +61,6 @@ function App() {
       ws.current.onclose = () => {
         console.log('WebSocket disconnected');
         setIsConnected(false);
-        setIsInRoom(false);
-        cleanup();
       };
 
       ws.current.onmessage = async (event) => {
@@ -65,13 +68,12 @@ function App() {
           const data = JSON.parse(event.data);
 
           if (data.type === 'room_info') {
-            setUsers(data.data.users);
+            setUsers(data.data.users || []);
           }
           else if (data.type === 'error') {
             setError(data.data);
           }
           else if (data.type === 'start_call') {
-            // Если звонок начал другой пользователь
             if (!isCallActive && pc.current) {
               const offer = await pc.current.createOffer();
               await pc.current.setLocalDescription(offer);
@@ -169,7 +171,6 @@ function App() {
     }
 
     try {
-      // Уведомляем сервер о начале звонка
       ws.current.send(JSON.stringify({ type: "start_call" }));
 
       const offer = await pc.current.createOffer();
@@ -187,14 +188,12 @@ function App() {
   const endCall = () => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ type: "end_call" }));
-      ws.current.close(); // Закрываем текущее соединение
+      ws.current.close();
     }
     cleanup();
-
-    // Сбрасываем состояние комнаты
     setIsInRoom(false);
+    setUsers([]);
 
-    // Заново подключаемся через небольшой таймаут
     setTimeout(() => {
       connectWebSocket();
     }, 300);
@@ -207,14 +206,21 @@ function App() {
       if (!connectWebSocket()) {
         return;
       }
-      // Ждем подключения
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Отправляем запрос на подключение к комнате
+    // Сохраняем оригинальное имя пользователя
+    if (!originalUsername) {
+      setOriginalUsername(username);
+    }
+
+    // Генерируем уникальное имя пользователя для повторного входа
+    const uniqueUsername = generateUniqueUsername(originalUsername || username);
+    setUsername(uniqueUsername);
+
     ws.current.send(JSON.stringify({
       room,
-      username
+      username: uniqueUsername
     }));
 
     if (!(await initializeWebRTC())) {
@@ -231,13 +237,22 @@ function App() {
         room,
         username
       }));
+      ws.current.close();
     }
     setIsInRoom(false);
     cleanup();
+    setUsers([]);
+
+    setTimeout(() => {
+      connectWebSocket();
+      // При переподключении используем оригинальное имя с новым суффиксом
+      if (originalUsername) {
+        setUsername(generateUniqueUsername(originalUsername));
+      }
+    }, 300);
   };
 
   useEffect(() => {
-    // Подключаемся к WebSocket при монтировании
     connectWebSocket();
 
     return () => {
