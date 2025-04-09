@@ -6,6 +6,8 @@ interface WebSocketMessage {
     data?: any;
     sdp?: RTCSessionDescriptionInit;
     ice?: RTCIceCandidateInit;
+    room?: string;
+    username?: string;
 }
 
 export const useWebRTC = (
@@ -14,26 +16,24 @@ export const useWebRTC = (
     roomId: string
 ) => {
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-    const [remoteUsers, setRemoteUsers] = useState<any[]>([]);
+    const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+    const [users, setUsers] = useState<string[]>([]);
     const [isCallActive, setIsCallActive] = useState(false);
     const [isConnected, setIsConnected] = useState(false);
+    const [isInRoom, setIsInRoom] = useState(false);
+    const [isCallInitiator, setIsCallInitiator] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const ws = useRef<WebSocket | null>(null);
     const pc = useRef<RTCPeerConnection | null>(null);
-
-    useEffect(() => {
-        // Автоматически устанавливаем isCallActive в true, если есть удаленный поток
-        const hasRemoteStream = remoteUsers.some(user => user.stream);
-        if (hasRemoteStream && !isCallActive) {
-            setIsCallActive(true);
-        }
-    }, [remoteUsers]);
+    const pendingIceCandidates = useRef<RTCIceCandidate[]>([]);
 
     const cleanup = () => {
         if (pc.current) {
             pc.current.onicecandidate = null;
             pc.current.ontrack = null;
+            pc.current.onnegotiationneeded = null;
+            pc.current.oniceconnectionstatechange = null;
             pc.current.close();
             pc.current = null;
         }
@@ -43,20 +43,27 @@ export const useWebRTC = (
             setLocalStream(null);
         }
 
-        if (ws.current) {
-            ws.current.close();
-            ws.current = null;
+        if (remoteStream) {
+            remoteStream.getTracks().forEach(track => track.stop());
+            setRemoteStream(null);
         }
 
         setIsCallActive(false);
+        setIsCallInitiator(false);
+        pendingIceCandidates.current = [];
     };
 
     const leaveRoom = () => {
         if (ws.current?.readyState === WebSocket.OPEN) {
-            ws.current.send(JSON.stringify({ type: 'leave' }));
+            ws.current.send(JSON.stringify({
+                type: 'leave',
+                room: roomId,
+                username
+            }));
         }
         cleanup();
-        setRemoteUsers([]);
+        setUsers([]);
+        setIsInRoom(false);
     };
 
     const connectWebSocket = () => {
@@ -65,11 +72,7 @@ export const useWebRTC = (
 
             ws.current.onopen = () => {
                 setIsConnected(true);
-                ws.current?.send(JSON.stringify({
-                    type: 'join',
-                    room: roomId,
-                    username
-                }));
+                setError(null);
             };
 
             ws.current.onerror = (error) => {
@@ -81,53 +84,86 @@ export const useWebRTC = (
             ws.current.onclose = () => {
                 console.log('WebSocket disconnected');
                 setIsConnected(false);
-                cleanup();
+                setTimeout(() => {
+                    if (!isConnected && isInRoom) {
+                        console.log('Attempting to reconnect...');
+                        connectWebSocket();
+                    }
+                }, 3000);
             };
 
             ws.current.onmessage = async (event) => {
                 try {
                     const data: WebSocketMessage = JSON.parse(event.data);
+                    console.log('Received message:', data);
 
                     if (data.type === 'room_info') {
-                        setRemoteUsers(
-                            data.data.users
-                                .filter((u: string) => u !== username)
-                                .map((u: string) => ({ username: u }))
-                        );
-                    }
-                    else if (data.type === 'join') {
-                        setRemoteUsers(prev => {
-                            if (prev.some(user => user.username === data.data)) {
-                                return prev;
-                            }
-                            return [...prev, { username: data.data }];
-                        });
-                    }
-                    else if (data.type === 'leave') {
-                        setRemoteUsers(prev =>
-                            prev.filter(user => user.username !== data.data)
-                        );
+                        setUsers(data.data.users || []);
                     }
                     else if (data.type === 'error') {
                         setError(data.data);
-                    } else if (data.sdp && pc.current) {
-                        await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-                        if (data.sdp.type === 'offer') {
-                            const answer = await pc.current.createAnswer();
-                            await pc.current.setLocalDescription(answer);
-                            if (ws.current?.readyState === WebSocket.OPEN) {
-                                ws.current.send(JSON.stringify({ sdp: answer }));
-                            }
+                    }
+                    else if (data.type === 'start_call') {
+                        if (!isCallActive && pc.current) {
+                            const offer = await pc.current.createOffer({
+                                offerToReceiveAudio: true,
+                                offerToReceiveVideo: true,
+                                voiceActivityDetection: false
+                            });
+                            await pc.current.setLocalDescription(offer);
+                            ws.current.send(JSON.stringify({
+                                type: 'offer',
+                                sdp: offer,
+                                room: roomId,
+                                username
+                            }));
+                            setIsCallActive(true);
+                            setIsCallInitiator(true);
                         }
-                    } else if (data.ice && pc.current) {
-                        try {
-                            await pc.current.addIceCandidate(new RTCIceCandidate(data.ice));
-                        } catch (e) {
-                            console.error('Error adding ICE candidate:', e);
+                    }
+                    else if (data.type === 'offer') {
+                        if (pc.current) {
+                            await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+
+                            const answer = await pc.current.createAnswer({
+                                offerToReceiveAudio: true,
+                                offerToReceiveVideo: true
+                            });
+                            await pc.current.setLocalDescription(answer);
+
+                            ws.current.send(JSON.stringify({
+                                type: 'answer',
+                                sdp: answer,
+                                room: roomId,
+                                username
+                            }));
+
+                            setIsCallActive(true);
+                        }
+                    }
+                    else if (data.type === 'answer') {
+                        if (pc.current && pc.current.signalingState !== 'stable') {
+                            await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                            setIsCallActive(true);
+
+                            pendingIceCandidates.current.forEach(candidate => {
+                                pc.current?.addIceCandidate(new RTCIceCandidate(candidate));
+                            });
+                            pendingIceCandidates.current = [];
+                        }
+                    }
+                    else if (data.type === 'ice_candidate') {
+                        const candidate = new RTCIceCandidate(data.ice);
+
+                        if (pc.current && pc.current.remoteDescription) {
+                            await pc.current.addIceCandidate(candidate);
+                        } else {
+                            pendingIceCandidates.current.push(candidate);
                         }
                     }
                 } catch (err) {
                     console.error('Error processing message:', err);
+                    setError('Error processing server message');
                 }
             };
 
@@ -141,17 +177,33 @@ export const useWebRTC = (
 
     const initializeWebRTC = async () => {
         try {
-            if (pc.current) {
-                cleanup();
-            }
+            cleanup();
 
-            pc.current = new RTCPeerConnection({
-                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-            });
+            const config = {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' }
+                ],
+                sdpSemantics: 'unified-plan' as const,
+                bundlePolicy: 'max-bundle' as const,
+                rtcpMuxPolicy: 'require' as const,
+                iceTransportPolicy: 'all' as const
+            };
+
+            pc.current = new RTCPeerConnection(config);
 
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: deviceIds.video ? { deviceId: { exact: deviceIds.video } } : true,
-                audio: deviceIds.audio ? { deviceId: { exact: deviceIds.audio } } : true
+                video: deviceIds.video ? {
+                    deviceId: { exact: deviceIds.video },
+                    width: { ideal: 640 },
+                    height: { ideal: 480 },
+                    frameRate: { ideal: 30 }
+                } : true,
+                audio: deviceIds.audio ? {
+                    deviceId: { exact: deviceIds.audio },
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                } : true
             });
 
             setLocalStream(stream);
@@ -161,26 +213,28 @@ export const useWebRTC = (
 
             pc.current.onicecandidate = (event) => {
                 if (event.candidate && ws.current?.readyState === WebSocket.OPEN) {
-                    ws.current.send(JSON.stringify({ ice: event.candidate }));
+                    ws.current.send(JSON.stringify({
+                        type: 'ice_candidate',
+                        ice: event.candidate,
+                        room: roomId,
+                        username
+                    }));
                 }
             };
 
             pc.current.ontrack = (event) => {
-                setRemoteUsers(prev => {
-                    const existingUser = prev.find(u => u.username !== username);
-                    if (existingUser) {
-                        return prev.map(u => ({
-                            ...u,
-                            stream: event.streams[0]
-                        }));
-                    }
-                    return [...prev, { username: 'Remote', stream: event.streams[0] }];
-                });
+                if (event.streams && event.streams[0]) {
+                    setRemoteStream(event.streams[0]);
+                }
             };
 
-            if (!ws.current) {
-                throw new Error('WebSocket connection not established');
-            }
+            pc.current.oniceconnectionstatechange = () => {
+                if (pc.current?.iceConnectionState === 'disconnected' ||
+                    pc.current?.iceConnectionState === 'failed') {
+                    console.log('ICE connection failed, attempting to restart...');
+                    reconnect();
+                }
+            };
 
             return true;
         } catch (err) {
@@ -198,10 +252,28 @@ export const useWebRTC = (
         }
 
         try {
-            const offer = await pc.current.createOffer();
+            ws.current.send(JSON.stringify({
+                type: "start_call",
+                room: roomId,
+                username
+            }));
+
+            const offer = await pc.current.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true,
+                voiceActivityDetection: false
+            });
             await pc.current.setLocalDescription(offer);
-            ws.current.send(JSON.stringify({ sdp: offer }));
+
+            ws.current.send(JSON.stringify({
+                type: "offer",
+                sdp: offer,
+                room: roomId,
+                username
+            }));
+
             setIsCallActive(true);
+            setIsCallInitiator(true);
             setError(null);
         } catch (err) {
             console.error('Error starting call:', err);
@@ -210,39 +282,78 @@ export const useWebRTC = (
     };
 
     const endCall = () => {
+        if (ws.current?.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+                type: "end_call",
+                room: roomId,
+                username
+            }));
+        }
         cleanup();
-        setRemoteUsers([]);
     };
 
-    const joinRoom = async () => {
-        setError(null);
+    const reconnect = async () => {
+        cleanup();
 
-        if (!connectWebSocket()) {
-            return;
+        if (ws.current) {
+            ws.current.close();
         }
 
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        if (isInRoom) {
+            await joinRoom(username);
+        } else {
+            connectWebSocket();
+        }
+    };
+
+    const joinRoom = async (uniqueUsername: string) => {
+        setError(null);
+
+        if (!isConnected) {
+            if (!connectWebSocket()) {
+                return;
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
 
         if (!(await initializeWebRTC())) {
             return;
         }
+
+        ws.current?.send(JSON.stringify({
+            action: "join",
+            room: roomId,
+            username: uniqueUsername
+        }));
+
+        setIsInRoom(true);
     };
 
     useEffect(() => {
+        connectWebSocket();
+
         return () => {
+            if (ws.current) {
+                ws.current.close();
+            }
             cleanup();
         };
     }, []);
 
     return {
         localStream,
-        remoteUsers,
+        remoteStream,
+        users,
         startCall,
         endCall,
         joinRoom,
+        leaveRoom,
         isCallActive,
         isConnected,
-        leaveRoom,
+        isInRoom,
+        isCallInitiator,
         error
     };
 };

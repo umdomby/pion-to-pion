@@ -1,3 +1,4 @@
+// file: client/app/webrtc/VideoCallApp.tsx
 'use client'
 
 import { useWebRTC } from './hooks/useWebRTC';
@@ -17,19 +18,27 @@ export const VideoCallApp = () => {
     });
     const [roomId, setRoomId] = useState('room1');
     const [username, setUsername] = useState(`User${Math.floor(Math.random() * 1000)}`);
+    const [originalUsername, setOriginalUsername] = useState('');
     const [hasPermission, setHasPermission] = useState(false);
 
     const {
         localStream,
-        remoteUsers,
+        remoteStream,
+        users,
         startCall,
         endCall,
         joinRoom,
         leaveRoom,
         isCallActive,
         isConnected,
-        error
+        isInRoom,
+        error,
+        isCallInitiator
     } = useWebRTC(selectedDevices, username, roomId);
+
+    const generateUniqueUsername = (base: string) => {
+        return `${base}_${Math.floor(Math.random() * 1000)}`;
+    };
 
     const loadDevices = async () => {
         try {
@@ -64,6 +73,15 @@ export const VideoCallApp = () => {
         await loadDevices();
     };
 
+    const handleJoinRoom = async () => {
+        if (!originalUsername) {
+            setOriginalUsername(username);
+        }
+        const uniqueUsername = generateUniqueUsername(originalUsername || username);
+        setUsername(uniqueUsername);
+        await joinRoom(uniqueUsername);
+    };
+
     return (
         <div className={styles.container}>
             <h1 className={styles.title}>WebRTC Video Call</h1>
@@ -71,13 +89,19 @@ export const VideoCallApp = () => {
             {error && <div className={styles.error}>{error}</div>}
 
             <div className={styles.controls}>
+                <div className={styles.connectionStatus}>
+                    Status: {isConnected ? (isInRoom ? `In room ${roomId}` : 'Connected') : 'Disconnected'}
+                    {isCallActive && ' (Call active)'}
+                    {isCallInitiator && ' (Initiator)'}
+                </div>
+
                 <div className={styles.inputGroup}>
                     <Label htmlFor="room">Room:</Label>
                     <Input
                         id="room"
                         value={roomId}
                         onChange={(e) => setRoomId(e.target.value)}
-                        disabled={isConnected}
+                        disabled={isInRoom}
                     />
                 </div>
 
@@ -87,58 +111,55 @@ export const VideoCallApp = () => {
                         id="username"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        disabled={isConnected}
+                        disabled={isInRoom}
                     />
                 </div>
 
-                {!isConnected ? (
+                {!isInRoom ? (
                     <Button
-                        onClick={joinRoom}
+                        onClick={handleJoinRoom}
+                        disabled={!isConnected || !hasPermission}
                         className={styles.button}
                     >
                         Join Room
                     </Button>
                 ) : (
                     <Button
-                        onClick={() => {
-                            endCall();
-                            leaveRoom();
-                        }}
+                        onClick={leaveRoom}
                         className={styles.button}
-                        variant="destructive"
                     >
                         Leave Room
                     </Button>
                 )}
 
-                {isConnected && !isCallActive && (
-                    <Button
-                        onClick={startCall}
-                        disabled={remoteUsers.length < 1}
-                        className={styles.button}
-                    >
-                        Start Call
-                    </Button>
-                )}
+                <div className={styles.userList}>
+                    <h3>Users in room ({users.length}):</h3>
+                    <ul>
+                        {users.map((user, index) => (
+                            <li key={index}>{user}</li>
+                        ))}
+                    </ul>
+                </div>
 
-                {isCallActive && (
-                    <Button
-                        onClick={endCall}
-                        className={styles.button}
-                        variant="destructive"
-                    >
-                        End Call
-                    </Button>
-                )}
-            </div>
-
-            <div className={styles.userList}>
-                <h3>Participants ({remoteUsers.length}):</h3>
-                <ul>
-                    {remoteUsers.map((user, index) => (
-                        <li key={index}>{user.username}</li>
-                    ))}
-                </ul>
+                <div className={styles.callControls}>
+                    {!isCallActive ? (
+                        <Button
+                            onClick={startCall}
+                            disabled={!isInRoom || users.length < 2}
+                            className={styles.button}
+                        >
+                            Start Call
+                        </Button>
+                    ) : (
+                        <Button
+                            onClick={endCall}
+                            className={styles.button}
+                            variant="destructive"
+                        >
+                            End Call
+                        </Button>
+                    )}
+                </div>
             </div>
 
             <div className={styles.videoContainer}>
@@ -153,12 +174,10 @@ export const VideoCallApp = () => {
 
                 <div className={styles.videoWrapper}>
                     <VideoPlayer
-                        stream={remoteUsers[0]?.stream || null}
+                        stream={remoteStream}
                         className={styles.remoteVideo}
                     />
-                    <div className={styles.videoLabel}>
-                        {remoteUsers[0]?.username || 'Connecting...'}
-                    </div>
+                    <div className={styles.videoLabel}>Remote</div>
                 </div>
             </div>
 
