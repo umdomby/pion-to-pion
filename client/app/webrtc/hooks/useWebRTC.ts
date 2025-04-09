@@ -104,11 +104,10 @@ export const useWebRTC = (
                         setError(data.data);
                     }
                     else if (data.type === 'start_call') {
-                        if (!isCallActive && pc.current) {
+                        if (!isCallActive && pc.current && ws.current?.readyState === WebSocket.OPEN) {
                             const offer = await pc.current.createOffer({
                                 offerToReceiveAudio: true,
-                                offerToReceiveVideo: true,
-                                voiceActivityDetection: false
+                                offerToReceiveVideo: true
                             });
                             await pc.current.setLocalDescription(offer);
                             ws.current.send(JSON.stringify({
@@ -122,7 +121,7 @@ export const useWebRTC = (
                         }
                     }
                     else if (data.type === 'offer') {
-                        if (pc.current) {
+                        if (pc.current && ws.current?.readyState === WebSocket.OPEN && data.sdp) {
                             await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
 
                             const answer = await pc.current.createAnswer({
@@ -142,7 +141,7 @@ export const useWebRTC = (
                         }
                     }
                     else if (data.type === 'answer') {
-                        if (pc.current && pc.current.signalingState !== 'stable') {
+                        if (pc.current && pc.current.signalingState !== 'stable' && data.sdp) {
                             await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
                             setIsCallActive(true);
 
@@ -153,12 +152,14 @@ export const useWebRTC = (
                         }
                     }
                     else if (data.type === 'ice_candidate') {
-                        const candidate = new RTCIceCandidate(data.ice);
+                        if (data.ice) {
+                            const candidate = new RTCIceCandidate(data.ice);
 
-                        if (pc.current && pc.current.remoteDescription) {
-                            await pc.current.addIceCandidate(candidate);
-                        } else {
-                            pendingIceCandidates.current.push(candidate);
+                            if (pc.current && pc.current.remoteDescription) {
+                                await pc.current.addIceCandidate(candidate);
+                            } else {
+                                pendingIceCandidates.current.push(candidate);
+                            }
                         }
                     }
                 } catch (err) {
@@ -260,8 +261,7 @@ export const useWebRTC = (
 
             const offer = await pc.current.createOffer({
                 offerToReceiveAudio: true,
-                offerToReceiveVideo: true,
-                voiceActivityDetection: false
+                offerToReceiveVideo: true
             });
             await pc.current.setLocalDescription(offer);
 
@@ -322,11 +322,13 @@ export const useWebRTC = (
             return;
         }
 
-        ws.current?.send(JSON.stringify({
-            action: "join",
-            room: roomId,
-            username: uniqueUsername
-        }));
+        if (ws.current?.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+                action: "join",
+                room: roomId,
+                username: uniqueUsername
+            }));
+        }
 
         setIsInRoom(true);
     };
