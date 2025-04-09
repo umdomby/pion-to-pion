@@ -11,43 +11,58 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [isInRoom, setIsInRoom] = useState(false);
   const [isCallInitiator, setIsCallInitiator] = useState(false);
+  const [iceCandidates, setIceCandidates] = useState([]);
 
-  const localVideoRef = useRef();
-  const remoteVideoRef = useRef();
-  const ws = useRef();
-  const pc = useRef();
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const ws = useRef(null);
+  const pc = useRef(null);
+  const pendingIceCandidates = useRef([]);
 
+  // Генерация уникального имени пользователя
   const generateUniqueUsername = (base) => {
     return `${base}_${Math.floor(Math.random() * 1000)}`;
   };
 
+  // Очистка ресурсов
   const cleanup = () => {
+    console.log('Cleaning up resources...');
+
     if (pc.current) {
+      console.log('Closing peer connection...');
       pc.current.onicecandidate = null;
       pc.current.ontrack = null;
+      pc.current.onnegotiationneeded = null;
+      pc.current.oniceconnectionstatechange = null;
       pc.current.close();
       pc.current = null;
     }
 
     if (localVideoRef.current?.srcObject) {
+      console.log('Stopping local media tracks...');
       localVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
       localVideoRef.current.srcObject = null;
     }
 
     if (remoteVideoRef.current?.srcObject) {
+      console.log('Stopping remote media tracks...');
       remoteVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
       remoteVideoRef.current.srcObject = null;
     }
 
     setIsCallActive(false);
     setIsCallInitiator(false);
+    pendingIceCandidates.current = [];
   };
 
+  // Подключение к WebSocket
   const connectWebSocket = () => {
+    console.log('Connecting to WebSocket...');
     try {
       ws.current = new WebSocket('wss://anybet.site/ws');
 
       ws.current.onopen = () => {
+        console.log('WebSocket connected');
         setIsConnected(true);
         setError('');
       };
@@ -61,11 +76,18 @@ function App() {
       ws.current.onclose = () => {
         console.log('WebSocket disconnected');
         setIsConnected(false);
+        setTimeout(() => {
+          if (!isConnected) {
+            console.log('Attempting to reconnect...');
+            connectWebSocket();
+          }
+        }, 3000);
       };
 
       ws.current.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
+          console.log('Received message:', data);
 
           if (data.type === 'room_info') {
             setUsers(data.data.users || []);
@@ -75,29 +97,66 @@ function App() {
           }
           else if (data.type === 'start_call') {
             if (!isCallActive && pc.current) {
-              const offer = await pc.current.createOffer();
+              console.log('Creating offer...');
+              const offer = await pc.current.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true,
+                voiceActivityDetection: false
+              });
               await pc.current.setLocalDescription(offer);
-              ws.current.send(JSON.stringify({ sdp: offer }));
+              ws.current.send(JSON.stringify({
+                type: 'offer',
+                sdp: offer,
+                room,
+                username
+              }));
+              setIsCallActive(true);
+              setIsCallInitiator(true);
+            }
+          }
+          else if (data.type === 'offer') {
+            console.log('Received offer:', data.sdp);
+            if (pc.current) {
+              await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+
+              const answer = await pc.current.createAnswer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
+              });
+              await pc.current.setLocalDescription(answer);
+
+              ws.current.send(JSON.stringify({
+                type: 'answer',
+                sdp: answer,
+                room,
+                username
+              }));
+
               setIsCallActive(true);
             }
           }
-          else if (data.sdp && pc.current) {
-            try {
+          else if (data.type === 'answer') {
+            console.log('Received answer:', data.sdp);
+            if (pc.current && pc.current.signalingState !== 'stable') {
               await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-              if (data.sdp.type === 'offer') {
-                const answer = await pc.current.createAnswer();
-                await pc.current.setLocalDescription(answer);
-                ws.current.send(JSON.stringify({ sdp: answer }));
-              }
-            } catch (err) {
-              console.error('Error processing SDP:', err);
-              setError('Error processing call data');
+              setIsCallActive(true);
+
+              // Добавляем ожидающие ICE кандидаты
+              pendingIceCandidates.current.forEach(candidate => {
+                pc.current.addIceCandidate(new RTCIceCandidate(candidate));
+              });
+              pendingIceCandidates.current = [];
             }
-          } else if (data.ice && pc.current) {
-            try {
-              await pc.current.addIceCandidate(new RTCIceCandidate(data.ice));
-            } catch (e) {
-              console.error('Error adding ICE candidate:', e);
+          }
+          else if (data.type === 'ice_candidate') {
+            console.log('Received ICE candidate:', data.ice);
+            const candidate = new RTCIceCandidate(data.ice);
+
+            if (pc.current && pc.current.remoteDescription) {
+              await pc.current.addIceCandidate(candidate);
+            } else {
+              console.log('Adding ICE candidate to pending list');
+              pendingIceCandidates.current.push(candidate);
             }
           }
         } catch (err) {
@@ -114,44 +173,85 @@ function App() {
     }
   };
 
+  // Инициализация WebRTC
   const initializeWebRTC = async () => {
+    console.log('Initializing WebRTC...');
     try {
-      if (pc.current) {
-        cleanup();
-      }
+      cleanup();
 
       const config = {
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          // Добавьте TURN серверы при необходимости
+          // { urls: 'turn:your-turn-server.com', username: 'user', credential: 'pass' }
+        ],
+        sdpSemantics: 'unified-plan',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+        iceTransportPolicy: 'all'
       };
 
       pc.current = new RTCPeerConnection(config);
 
+      // Получение медиапотока
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 30 }
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
         });
+
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
+
+        // Добавление треков в соединение
         stream.getTracks().forEach(track => {
           pc.current.addTrack(track, stream);
         });
       } catch (err) {
         console.error('Error accessing media devices:', err);
         setError('Could not access camera/microphone');
-        return;
+        return false;
       }
 
+      // Обработка ICE кандидатов
       pc.current.onicecandidate = (event) => {
         if (event.candidate && ws.current?.readyState === WebSocket.OPEN) {
-          ws.current.send(JSON.stringify({ ice: event.candidate }));
+          console.log('Sending ICE candidate:', event.candidate);
+          ws.current.send(JSON.stringify({
+            type: 'ice_candidate',
+            ice: event.candidate,
+            room,
+            username
+          }));
         }
       };
 
+      // Обработка входящих треков
       pc.current.ontrack = (event) => {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
+        console.log('Received track:', event.track.kind);
+        if (event.streams && event.streams[0]) {
+          if (remoteVideoRef.current.srcObject !== event.streams[0]) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+          }
+        }
+      };
+
+      // Обработка изменений состояния ICE
+      pc.current.oniceconnectionstatechange = () => {
+        console.log('ICE connection state:', pc.current.iceConnectionState);
+        if (pc.current.iceConnectionState === 'disconnected' ||
+            pc.current.iceConnectionState === 'failed') {
+          console.log('ICE connection failed, attempting to restart...');
+          reconnect();
         }
       };
 
@@ -164,18 +264,35 @@ function App() {
     }
   };
 
+  // Начало звонка
   const startCall = async () => {
+    console.log('Starting call...');
     if (!pc.current || !ws.current || ws.current.readyState !== WebSocket.OPEN) {
       setError('Not connected to server');
       return;
     }
 
     try {
-      ws.current.send(JSON.stringify({ type: "start_call" }));
+      ws.current.send(JSON.stringify({
+        type: "start_call",
+        room,
+        username
+      }));
 
-      const offer = await pc.current.createOffer();
+      const offer = await pc.current.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+        voiceActivityDetection: false
+      });
       await pc.current.setLocalDescription(offer);
-      ws.current.send(JSON.stringify({ sdp: offer }));
+
+      ws.current.send(JSON.stringify({
+        type: "offer",
+        sdp: offer,
+        room,
+        username
+      }));
+
       setIsCallActive(true);
       setIsCallInitiator(true);
       setError('');
@@ -185,21 +302,42 @@ function App() {
     }
   };
 
+  // Завершение звонка
   const endCall = () => {
+    console.log('Ending call...');
     if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ type: "end_call" }));
-      ws.current.close();
+      ws.current.send(JSON.stringify({
+        type: "end_call",
+        room,
+        username
+      }));
     }
     cleanup();
     setIsInRoom(false);
     setUsers([]);
-
-    setTimeout(() => {
-      connectWebSocket();
-    }, 300);
   };
 
+  // Переподключение
+  const reconnect = async () => {
+    console.log('Attempting to reconnect...');
+    cleanup();
+
+    if (ws.current) {
+      ws.current.close();
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    if (isInRoom) {
+      await joinRoom();
+    } else {
+      connectWebSocket();
+    }
+  };
+
+  // Вход в комнату
   const joinRoom = async () => {
+    console.log('Joining room...');
     setError('');
 
     if (!isConnected) {
@@ -218,44 +356,40 @@ function App() {
     const uniqueUsername = generateUniqueUsername(originalUsername || username);
     setUsername(uniqueUsername);
 
-    ws.current.send(JSON.stringify({
-      room,
-      username: uniqueUsername
-    }));
-
     if (!(await initializeWebRTC())) {
       return;
     }
 
+    ws.current.send(JSON.stringify({
+      action: "join",
+      room,
+      username: uniqueUsername
+    }));
+
     setIsInRoom(true);
   };
 
+  // Выход из комнаты
   const leaveRoom = () => {
+    console.log('Leaving room...');
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({
         type: "leave",
         room,
         username
       }));
-      ws.current.close();
     }
     setIsInRoom(false);
     cleanup();
     setUsers([]);
-
-    setTimeout(() => {
-      connectWebSocket();
-      // При переподключении используем оригинальное имя с новым суффиксом
-      if (originalUsername) {
-        setUsername(generateUniqueUsername(originalUsername));
-      }
-    }, 300);
   };
 
+  // Эффект при монтировании
   useEffect(() => {
     connectWebSocket();
 
     return () => {
+      console.log('Component unmounting, cleaning up...');
       if (ws.current) {
         ws.current.close();
       }
@@ -268,6 +402,7 @@ function App() {
         <div className="control-panel">
           <div className="connection-status">
             Status: {isConnected ? (isInRoom ? `In room ${room}` : 'Connected') : 'Disconnected'}
+            {isCallActive && ' (Call active)'}
           </div>
 
           <div className="input-group">
@@ -309,7 +444,10 @@ function App() {
 
           <div className="call-controls">
             {!isCallActive ? (
-                <button onClick={startCall} disabled={!isInRoom || users.length < 2}>
+                <button
+                    onClick={startCall}
+                    disabled={!isInRoom || users.length < 2}
+                >
                   Start Call
                 </button>
             ) : (
@@ -326,6 +464,7 @@ function App() {
                 ref={localVideoRef}
                 autoPlay
                 muted
+                playsInline
                 className="local-video"
             />
             <div className="video-label">You ({username})</div>
@@ -335,6 +474,7 @@ function App() {
             <video
                 ref={remoteVideoRef}
                 autoPlay
+                playsInline
                 className="remote-video"
             />
             <div className="video-label">Remote</div>
