@@ -64,6 +64,8 @@ export const useWebRTC = (
         cleanup();
         setUsers([]);
         setIsInRoom(false);
+        ws.current?.close();
+        ws.current = null;
     };
 
     const connectWebSocket = () => {
@@ -80,27 +82,12 @@ export const useWebRTC = (
                 console.error('WebSocket error:', event);
                 setError('Connection error');
                 setIsConnected(false);
-
-                setTimeout(() => {
-                    if (!isConnected && isInRoom) {
-                        console.log('Attempting to reconnect after error...');
-                        connectWebSocket();
-                    }
-                }, 3000);
             };
 
             ws.current.onclose = (event) => {
                 console.log('WebSocket disconnected, code:', event.code, 'reason:', event.reason);
                 setIsConnected(false);
-
-                if (event.code !== 1000) {
-                    setTimeout(() => {
-                        if (!isConnected && isInRoom) {
-                            console.log('Attempting to reconnect after close...');
-                            connectWebSocket();
-                        }
-                    }, 3000);
-                }
+                setIsInRoom(false);
             };
 
             ws.current.onmessage = async (event) => {
@@ -334,17 +321,13 @@ export const useWebRTC = (
                 room: roomId,
                 username: uniqueUsername
             }));
+            setIsInRoom(true);
         }
-
-        setIsInRoom(true);
     };
 
     useEffect(() => {
         return () => {
-            if (ws.current) {
-                ws.current.close(1000, 'Component unmounted');
-            }
-            cleanup();
+            leaveRoom();
         };
     }, []);
 
