@@ -1,4 +1,3 @@
-// file: client/app/webrtc/VideoCallApp.tsx
 'use client'
 
 import { useWebRTC } from './hooks/useWebRTC';
@@ -20,6 +19,7 @@ export const VideoCallApp = () => {
     const [username, setUsername] = useState(`User${Math.floor(Math.random() * 1000)}`);
     const [originalUsername, setOriginalUsername] = useState('');
     const [hasPermission, setHasPermission] = useState(false);
+    const [devicesLoaded, setDevicesLoaded] = useState(false);
 
     const {
         localStream,
@@ -42,16 +42,22 @@ export const VideoCallApp = () => {
 
     const loadDevices = async () => {
         try {
+            // Сначала запрашиваем разрешение на доступ к устройствам
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: true,
                 audio: true
             });
+
+            // Останавливаем треки, так как нам нужно только разрешение
             stream.getTracks().forEach(track => track.stop());
 
+            // Теперь получаем список устройств
             const devices = await navigator.mediaDevices.enumerateDevices();
             setDevices(devices);
             setHasPermission(true);
+            setDevicesLoaded(true);
 
+            // Устанавливаем первые доступные устройства по умолчанию
             const videoDevice = devices.find(d => d.kind === 'videoinput');
             const audioDevice = devices.find(d => d.kind === 'audioinput');
 
@@ -62,15 +68,15 @@ export const VideoCallApp = () => {
         } catch (error) {
             console.error('Device access error:', error);
             setHasPermission(false);
+            setDevicesLoaded(true);
         }
     };
 
-    useEffect(() => {
-        loadDevices();
-    }, []);
-
-    const handleRefreshDevices = async () => {
-        await loadDevices();
+    const handleDeviceChange = (type: 'video' | 'audio', deviceId: string) => {
+        setSelectedDevices(prev => ({
+            ...prev,
+            [type]: deviceId
+        }));
     };
 
     const handleJoinRoom = async () => {
@@ -81,6 +87,11 @@ export const VideoCallApp = () => {
         setUsername(uniqueUsername);
         await joinRoom(uniqueUsername);
     };
+
+    // Автоматически загружаем устройства при монтировании компонента
+    useEffect(() => {
+        loadDevices();
+    }, []);
 
     return (
         <div className={styles.container}>
@@ -141,7 +152,7 @@ export const VideoCallApp = () => {
                     </ul>
                 </div>
 
-                <div className={styles.callControls}>
+                <div>
                     {!isCallActive ? (
                         <Button
                             onClick={startCall}
@@ -181,28 +192,19 @@ export const VideoCallApp = () => {
                 </div>
             </div>
 
-            {!isConnected && (
-                <div className={styles.deviceSelection}>
-                    <h3>Select devices:</h3>
-                    {!hasPermission ? (
-                        <Button
-                            onClick={loadDevices}
-                            className={styles.refreshButton}
-                        >
-                            Request camera & microphone access
-                        </Button>
-                    ) : (
-                        <DeviceSelector
-                            devices={devices}
-                            selectedDevices={selectedDevices}
-                            onChange={(type, deviceId) =>
-                                setSelectedDevices(prev => ({...prev, [type]: deviceId}))
-                            }
-                            onRefresh={handleRefreshDevices}
-                        />
-                    )}
-                </div>
-            )}
+            <div className={styles.deviceSelection}>
+                <h3>Select devices:</h3>
+                {devicesLoaded ? (
+                    <DeviceSelector
+                        devices={devices}
+                        selectedDevices={selectedDevices}
+                        onChange={handleDeviceChange}
+                        onRefresh={loadDevices}
+                    />
+                ) : (
+                    <div>Loading devices...</div>
+                )}
+            </div>
         </div>
     );
 };
