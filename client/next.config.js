@@ -8,8 +8,14 @@ const nextConfig = {
     async headers() {
         return [
             {
-                source: '/_next/:path*',
+                source: '/(.*)', // применяется ко всем страницам
                 headers: [
+                    {
+                        key: 'Permissions-Policy',
+                        // value: 'microphone=("https://anybet.site"), camera=("https://anybet.site")',
+                        //или только для своего домена:
+                        value: 'microphone=self, camera=self',
+                    },
                     {
                         key: 'Access-Control-Allow-Origin',
                         value: 'https://anybet.site',
