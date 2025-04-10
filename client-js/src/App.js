@@ -57,118 +57,62 @@ function App() {
 
   // Подключение к WebSocket
   const connectWebSocket = () => {
-    console.log('Connecting to WebSocket...');
     try {
       ws.current = new WebSocket('wss://anybet.site/ws');
 
       ws.current.onopen = () => {
         console.log('WebSocket connected');
         setIsConnected(true);
-        setError('');
+        setError(null);
+
+        // If we were in a room before reconnecting, rejoin
+        if (isInRoom) {
+          joinRoom(username).catch(err => {
+            console.error('Failed to rejoin room:', err);
+            setError('Failed to rejoin room after reconnect');
+          });
+        }
       };
 
-      ws.current.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setError('Connection error');
+      ws.current.onerror = (event) => {
+        console.error('WebSocket error event:', event);
+        setError('WebSocket connection failed. Please check your network connection.');
         setIsConnected(false);
-      };
 
-      ws.current.onclose = () => {
-        console.log('WebSocket disconnected');
-        setIsConnected(false);
+        // Attempt to reconnect after a delay
         setTimeout(() => {
           if (!isConnected) {
-            console.log('Attempting to reconnect...');
+            console.log('Attempting to reconnect WebSocket...');
             connectWebSocket();
           }
         }, 3000);
       };
 
-      ws.current.onmessage = async (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Received message:', data);
+      ws.current.onclose = (event) => {
+        console.log(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
+        setIsConnected(false);
 
-          if (data.type === 'room_info') {
-            setUsers(data.data.users || []);
-          }
-          else if (data.type === 'error') {
-            setError(data.data);
-          }
-          else if (data.type === 'start_call') {
-            if (!isCallActive && pc.current) {
-              console.log('Creating offer...');
-              const offer = await pc.current.createOffer({
-                offerToReceiveAudio: true,
-                offerToReceiveVideo: true,
-                voiceActivityDetection: false
-              });
-              await pc.current.setLocalDescription(offer);
-              ws.current.send(JSON.stringify({
-                type: 'offer',
-                sdp: offer,
-                room,
-                username
-              }));
-              setIsCallActive(true);
-              setIsCallInitiator(true);
+        // Only attempt reconnect if the close wasn't intentional
+        if (event.code !== 1000) { // 1000 is normal closure
+          setTimeout(() => {
+            if (!isConnected && isInRoom) {
+              console.log('Attempting to reconnect WebSocket...');
+              connectWebSocket();
             }
-          }
-          else if (data.type === 'offer') {
-            console.log('Received offer:', data.sdp);
-            if (pc.current) {
-              await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-
-              const answer = await pc.current.createAnswer({
-                offerToReceiveAudio: true,
-                offerToReceiveVideo: true
-              });
-              await pc.current.setLocalDescription(answer);
-
-              ws.current.send(JSON.stringify({
-                type: 'answer',
-                sdp: answer,
-                room,
-                username
-              }));
-
-              setIsCallActive(true);
-            }
-          }
-          else if (data.type === 'answer') {
-            console.log('Received answer:', data.sdp);
-            if (pc.current && pc.current.signalingState !== 'stable') {
-              await pc.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-              setIsCallActive(true);
-
-              // Добавляем ожидающие ICE кандидаты
-              pendingIceCandidates.current.forEach(candidate => {
-                pc.current.addIceCandidate(new RTCIceCandidate(candidate));
-              });
-              pendingIceCandidates.current = [];
-            }
-          }
-          else if (data.type === 'ice_candidate') {
-            console.log('Received ICE candidate:', data.ice);
-            const candidate = new RTCIceCandidate(data.ice);
-
-            if (pc.current && pc.current.remoteDescription) {
-              await pc.current.addIceCandidate(candidate);
-            } else {
-              console.log('Adding ICE candidate to pending list');
-              pendingIceCandidates.current.push(candidate);
-            }
-          }
-        } catch (err) {
-          console.error('Error processing message:', err);
-          setError('Error processing server message');
+          }, 3000);
         }
       };
 
       return true;
     } catch (err) {
-      console.error('WebSocket connection failed:', err);
+      console.error('WebSocket connection error:', err);
       setError('Failed to connect to server');
+      setTimeout(() => {
+        if (!isConnected && isInRoom) {
+          console.log('Attempting to reconnect WebSocket...');
+          connectWebSocket();
+        }
+      }, 3000);
       return false;
     }
   };
@@ -336,37 +280,49 @@ function App() {
   };
 
   // Вход в комнату
-  const joinRoom = async () => {
-    console.log('Joining room...');
-    setError('');
+  const joinRoom = async (uniqueUsername: string) => {
+    try {
+      setError(null);
 
-    if (!isConnected) {
-      if (!connectWebSocket()) {
-        return;
+      if (!isConnected) {
+        if (!connectWebSocket()) {
+          throw new Error('Failed to connect to server');
+        }
+        // Wait for connection to establish
+        await new Promise((resolve, reject) => {
+          const checkConnection = () => {
+            if (isConnected) {
+              resolve(true);
+            } else if (!ws.current || ws.current.readyState === WebSocket.CLOSED) {
+              reject(new Error('Connection failed'));
+            } else {
+              setTimeout(checkConnection, 100);
+            }
+          };
+          checkConnection();
+        });
       }
-      await new Promise(resolve => setTimeout(resolve, 500));
+
+      if (!(await initializeWebRTC())) {
+        throw new Error('Failed to initialize WebRTC');
+      }
+
+      if (ws.current?.readyState !== WebSocket.OPEN) {
+        throw new Error('WebSocket is not open');
+      }
+
+      ws.current.send(JSON.stringify({
+        action: "join",
+        room: roomId,
+        username: uniqueUsername
+      }));
+
+      setIsInRoom(true);
+    } catch (err) {
+      console.error('Error joining room:', err);
+      setError(`Failed to join room: ${err.message}`);
+      return false;
     }
-
-    // Сохраняем оригинальное имя пользователя
-    if (!originalUsername) {
-      setOriginalUsername(username);
-    }
-
-    // Генерируем уникальное имя пользователя для повторного входа
-    const uniqueUsername = generateUniqueUsername(originalUsername || username);
-    setUsername(uniqueUsername);
-
-    if (!(await initializeWebRTC())) {
-      return;
-    }
-
-    ws.current.send(JSON.stringify({
-      action: "join",
-      room,
-      username: uniqueUsername
-    }));
-
-    setIsInRoom(true);
   };
 
   // Выход из комнаты

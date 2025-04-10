@@ -73,23 +73,36 @@ export const useWebRTC = (
             ws.current.onopen = () => {
                 setIsConnected(true);
                 setError(null);
+                console.log('WebSocket connected');
             };
 
-            ws.current.onerror = (error) => {
-                console.error('WebSocket error:', error);
+            ws.current.onerror = (event) => {
+                console.error('WebSocket error:', event);
                 setError('Connection error');
                 setIsConnected(false);
-            };
 
-            ws.current.onclose = () => {
-                console.log('WebSocket disconnected');
-                setIsConnected(false);
+                // Попытка переподключения при ошибке
                 setTimeout(() => {
                     if (!isConnected && isInRoom) {
-                        console.log('Attempting to reconnect...');
+                        console.log('Attempting to reconnect after error...');
                         connectWebSocket();
                     }
                 }, 3000);
+            };
+
+            ws.current.onclose = (event) => {
+                console.log('WebSocket disconnected, code:', event.code, 'reason:', event.reason);
+                setIsConnected(false);
+
+                // Попытка переподключения только если это не было преднамеренным закрытием
+                if (event.code !== 1000) { // 1000 - нормальное закрытие
+                    setTimeout(() => {
+                        if (!isConnected && isInRoom) {
+                            console.log('Attempting to reconnect after close...');
+                            connectWebSocket();
+                        }
+                    }, 3000);
+                }
             };
 
             ws.current.onmessage = async (event) => {
@@ -176,6 +189,7 @@ export const useWebRTC = (
         }
     };
 
+    // Остальной код остается без изменений...
     const initializeWebRTC = async () => {
         try {
             cleanup();
@@ -338,7 +352,8 @@ export const useWebRTC = (
 
         return () => {
             if (ws.current) {
-                ws.current.close();
+                // Используем код 1000 (нормальное закрытие) при размонтировании
+                ws.current.close(1000, 'Component unmounted');
             }
             cleanup();
         };
