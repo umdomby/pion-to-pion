@@ -21,7 +21,6 @@ export const useWebRTC = (
     const [isCallActive, setIsCallActive] = useState(false);
     const [isConnected, setIsConnected] = useState(false);
     const [isInRoom, setIsInRoom] = useState(false);
-    const [isCallInitiator, setIsCallInitiator] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const ws = useRef<WebSocket | null>(null);
@@ -49,7 +48,6 @@ export const useWebRTC = (
         }
 
         setIsCallActive(false);
-        setIsCallInitiator(false);
         pendingIceCandidates.current = [];
     };
 
@@ -80,7 +78,7 @@ export const useWebRTC = (
 
             ws.current.onerror = (event) => {
                 console.error('WebSocket error:', event);
-                setError('Connection error');
+                setError('Ошибка подключения');
                 setIsConnected(false);
             };
 
@@ -100,23 +98,6 @@ export const useWebRTC = (
                     }
                     else if (data.type === 'error') {
                         setError(data.data);
-                    }
-                    else if (data.type === 'start_call') {
-                        if (!isCallActive && pc.current && ws.current?.readyState === WebSocket.OPEN) {
-                            const offer = await pc.current.createOffer({
-                                offerToReceiveAudio: true,
-                                offerToReceiveVideo: true
-                            });
-                            await pc.current.setLocalDescription(offer);
-                            ws.current.send(JSON.stringify({
-                                type: 'offer',
-                                sdp: offer,
-                                room: roomId,
-                                username
-                            }));
-                            setIsCallActive(true);
-                            setIsCallInitiator(true);
-                        }
                     }
                     else if (data.type === 'offer') {
                         if (pc.current && ws.current?.readyState === WebSocket.OPEN && data.sdp) {
@@ -162,14 +143,14 @@ export const useWebRTC = (
                     }
                 } catch (err) {
                     console.error('Error processing message:', err);
-                    setError('Error processing server message');
+                    setError('Ошибка обработки сообщения сервера');
                 }
             };
 
             return true;
         } catch (err) {
             console.error('WebSocket connection error:', err);
-            setError('Failed to connect to server');
+            setError('Не удалось подключиться к серверу');
             return false;
         }
     };
@@ -238,56 +219,10 @@ export const useWebRTC = (
             return true;
         } catch (err) {
             console.error('WebRTC initialization error:', err);
-            setError('Failed to initialize WebRTC');
+            setError('Не удалось инициализировать WebRTC');
             cleanup();
             return false;
         }
-    };
-
-    const startCall = async () => {
-        if (!pc.current || !ws.current || ws.current.readyState !== WebSocket.OPEN) {
-            setError('Not connected to server');
-            return;
-        }
-
-        try {
-            ws.current.send(JSON.stringify({
-                type: "start_call",
-                room: roomId,
-                username
-            }));
-
-            const offer = await pc.current.createOffer({
-                offerToReceiveAudio: true,
-                offerToReceiveVideo: true
-            });
-            await pc.current.setLocalDescription(offer);
-
-            ws.current.send(JSON.stringify({
-                type: "offer",
-                sdp: offer,
-                room: roomId,
-                username
-            }));
-
-            setIsCallActive(true);
-            setIsCallInitiator(true);
-            setError(null);
-        } catch (err) {
-            console.error('Error starting call:', err);
-            setError('Failed to start call');
-        }
-    };
-
-    const endCall = () => {
-        if (ws.current?.readyState === WebSocket.OPEN) {
-            ws.current.send(JSON.stringify({
-                type: "end_call",
-                room: roomId,
-                username
-            }));
-        }
-        cleanup();
     };
 
     const reconnect = async () => {
@@ -322,6 +257,22 @@ export const useWebRTC = (
                 username: uniqueUsername
             }));
             setIsInRoom(true);
+
+            // Автоматически начинаем звонок при входе в комнату
+            if (pc.current) {
+                const offer = await pc.current.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                });
+                await pc.current.setLocalDescription(offer);
+                ws.current.send(JSON.stringify({
+                    type: "offer",
+                    sdp: offer,
+                    room: roomId,
+                    username: uniqueUsername
+                }));
+                setIsCallActive(true);
+            }
         }
     };
 
@@ -335,14 +286,11 @@ export const useWebRTC = (
         localStream,
         remoteStream,
         users,
-        startCall,
-        endCall,
         joinRoom,
         leaveRoom,
         isCallActive,
         isConnected,
         isInRoom,
-        isCallInitiator,
         error
     };
 };
