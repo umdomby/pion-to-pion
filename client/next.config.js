@@ -3,7 +3,7 @@
 const nextConfig = {
     reactStrictMode: true,
     images: {
-        domains: ['localhost'],
+        domains: ['anybet.site'],
     },
     async headers() {
         return [
@@ -18,7 +18,7 @@ const nextConfig = {
                     },
                     {
                         key: 'Access-Control-Allow-Origin',
-                        value: 'localhost',
+                        value: 'https://anybet.site',
                     },
                     {
                         key: 'Access-Control-Allow-Methods',
@@ -35,13 +35,14 @@ const nextConfig = {
                 headers: [
                     {
                         key: 'Access-Control-Allow-Origin',
-                        value: 'localhost',
+                        value: 'https://anybet.site',
                     },
                 ],
             },
         ]
     },
     allowedDevOrigins: [
+        'anybet.site',
         'localhost',
     ],
 }
